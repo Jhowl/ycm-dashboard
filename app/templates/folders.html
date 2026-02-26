@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Folders | YouTube Upload Manager{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+  <section class="card header-row span-2">
+    <div>
+      <h1>Lista de Folders</h1>
+      <p>Detecta jogos automaticamente pelo nome do folder.</p>
+    </div>
+    <form method="post" action="/ui/folders/scan">
+      <button type="submit">Scan folders</button>
+    </form>
+  </section>
+
+  <section class="card span-2">
+    <div class="toggle-row">
+      {% if include_inactive %}
+        <a href="/folders">Ocultar inativos</a>
+      {% else %}
+        <a href="/folders?include_inactive=true">Mostrar inativos</a>
+      {% endif %}
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Nome</th>
+          <th>Slug</th>
+          <th>URL</th>
+          <th>Steam game</th>
+          <th>Videos</th>
+          <th>Status</th>
+          <th>Ultimo scan</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for folder in folders %}
+        <tr>
+          <td>{{ folder.name }}</td>
+          <td><code>{{ folder.slug }}</code></td>
+          <td><a href="{{ folder.series_url }}">{{ folder.series_url }}</a></td>
+          <td>
+            <p>{{ folder.steam_game_name or 'nao vinculado' }}</p>
+            <form method="post" action="/ui/folders/{{ folder.id }}/steam-link" class="inline-form">
+              <select name="steam_app_id">
+                <option value="">Desvincular</option>
+                {% for game in steam_games %}
+                  <option value="{{ game.appid }}" {% if folder.steam_app_id == game.appid %}selected{% endif %}>
+                    {{ game.name }} ({{ game.appid }})
+                  </option>
+                {% endfor %}
+              </select>
+              <button type="submit">Salvar</button>
+            </form>
+          </td>
+          <td>{{ folder.video_count }}</td>
+          <td>
+            {% if folder.active %}
+              <span class="badge ok">ativo</span>
+            {% else %}
+              <span class="badge muted">inativo</span>
+            {% endif %}
+          </td>
+          <td>{{ folder.last_scan_at | ny_datetime }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7">Nenhum folder encontrado. Clique em "Scan folders".</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}

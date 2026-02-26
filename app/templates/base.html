@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}YouTube Upload Manager{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="dashboard-body">
+    {% set path = request.url.path %}
+    <div class="desktop-warning">
+      <h2>Desktop mode only</h2>
+      <p>Abra este painel em uma tela desktop (>= 1200px).</p>
+    </div>
+
+    <div class="bg-shape bg-shape-a"></div>
+    <div class="bg-shape bg-shape-b"></div>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a href="/" class="brand">YCM Dashboard</a>
+        <p class="sidebar-sub">YouTube gameplay control center</p>
+
+        <nav class="sidebar-nav">
+          <a href="/" class="{% if path == '/' %}active{% endif %}">Home</a>
+          <a href="/config" class="{% if path.startswith('/config') %}active{% endif %}">Config</a>
+          <a href="/folders" class="{% if path.startswith('/folders') %}active{% endif %}">Folders</a>
+        </nav>
+
+        <div class="sidebar-foot">
+          <p>Layout: dashboard desktop</p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </body>
+</html>

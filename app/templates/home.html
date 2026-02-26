@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Home | YouTube Upload Manager{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid home-grid">
+  <section class="card hero span-2">
+    <div class="hero-top">
+      <div class="hero-copy">
+        <h1>Home do Canal</h1>
+        <p class="hero-path">Raiz monitorada: <code>{{ video_root }}</code></p>
+      </div>
+      <nav class="hero-links" aria-label="Acesso principal">
+        <a class="button-link subtle" href="/">Home</a>
+        <a class="button-link subtle" href="/folders">Abrir Folders</a>
+        <a class="button-link subtle" href="/config">Abrir Config</a>
+      </nav>
+    </div>
+    <div class="stats-grid">
+      <article>
+        <span>Folders</span>
+        <strong>{{ stats.folders_total }}</strong>
+      </article>
+      <article>
+        <span>Ativos</span>
+        <strong>{{ stats.folders_active }}</strong>
+      </article>
+      <article>
+        <span>Pendentes</span>
+        <strong>{{ stats.pending_drafts }}</strong>
+      </article>
+      <article>
+        <span>Prontos p/ upload</span>
+        <strong>{{ stats.ready_to_upload }}</strong>
+      </article>
+    </div>
+  </section>
+
+  <section class="card compact-card token-card span-2">
+    <div class="token-head">
+      <div>
+        <p class="token-label">YouTube</p>
+        <h2>Status do token</h2>
+      </div>
+      <div class="token-badge-wrap">
+        {% if youtube_token_exists %}
+          <span class="badge ok">encontrado</span>
+        {% else %}
+          <span class="badge muted">nao encontrado</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="token-foot">
+      <div class="token-meta">
+        {% if youtube_token_updated_at %}
+          <p>Atualizado em (New York): <code>{{ youtube_token_updated_at }}</code></p>
+        {% else %}
+          <p class="muted">Token ainda nao foi gerado neste servidor.</p>
+        {% endif %}
+      </div>
+      <a class="button-link" href="/config">Gerenciar token</a>
+    </div>
+  </section>
+
+  <section class="card span-2">
+    <h2>Steam Profile</h2>
+    {% if steam_data.error %}
+      <p class="error-text">{{ steam_data.error }}</p>
+    {% elif steam_data.profile %}
+      <div class="steam-profile">
+        <img src="{{ steam_data.profile.avatarfull }}" alt="Steam avatar" class="steam-avatar" />
+        <div>
+          <h3>{{ steam_data.profile.personaname }}</h3>
+          <p><a href="{{ steam_data.profile.profileurl }}" target="_blank" rel="noreferrer">Abrir perfil Steam</a></p>
+          {% if steam_data.last_updated_label %}
+            <p>Atualizado em (New York): <code>{{ steam_data.last_updated_label }}</code></p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="steam-grid">
+        <div class="steam-box">
+          <h3>Ultimos jogos</h3>
+          <ul class="list-scroll">
+            {% for game in steam_data.recent_games %}
+              <li>
+                <strong>{{ game.name }}</strong>
+                <span>2 semanas: {{ game.playtime_2weeks_label }}</span>
+                <span>Total: {{ game.playtime_forever_label }}</span>
+              </li>
+            {% else %}
+              <li>Nenhum jogo recente encontrado.</li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div class="steam-box">
+          <h3>Ultimas conquistas</h3>
+          <ul class="list-scroll">
+            {% for achievement in steam_data.recent_achievements %}
+              <li>
+                <strong>{{ achievement.name }}</strong>
+                <span>{{ achievement.game }}</span>
+                <span>{{ achievement.unlocktime_label }}</span>
+              </li>
+            {% else %}
+              <li>Nenhuma conquista recente encontrada.</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    {% else %}
+      <p class="error-text">Steam nao configurado.</p>
+    {% endif %}
+  </section>
+
+  <section class="card span-2">
+    <h2>Todos os folders</h2>
+    <div class="table-wrap compact-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>Slug</th>
+            <th>URL</th>
+            <th>Steam game</th>
+            <th>Videos</th>
+            <th>Status</th>
+            <th>Ultimo scan</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for folder in folders %}
+          <tr>
+            <td>{{ folder.name }}</td>
+            <td><code>{{ folder.slug }}</code></td>
+            <td><a href="{{ folder.series_url }}">{{ folder.series_url }}</a></td>
+            <td>{{ folder.steam_game_name or 'nao vinculado' }}</td>
+            <td>{{ folder.video_count }}</td>
+            <td>
+              {% if folder.active %}
+                <span class="badge ok">ativo</span>
+              {% else %}
+                <span class="badge muted">inativo</span>
+              {% endif %}
+            </td>
+            <td>{{ folder.last_scan_at | ny_datetime }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="7">Nenhum folder encontrado ainda.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+{% endblock %}

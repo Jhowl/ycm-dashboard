@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Config | YouTube Upload Manager{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid two-col-grid">
+  <section class="card hero span-2">
+    <h1>Config do Canal</h1>
+    <p>Ajuste defaults e conecte YouTube OAuth2.</p>
+  </section>
+
+  <section class="card">
+    <h2>YouTube OAuth2</h2>
+    <p>Path para gerar token: <code>/ui/youtube/oauth/start</code></p>
+    <p>Callback configurado: <code>{{ youtube_redirect_uri }}</code></p>
+    <p>Arquivo do token: <code>{{ youtube_token_file }}</code></p>
+    <p>
+      Status do token:
+      {% if youtube_token_exists %}
+        <span class="badge ok">encontrado</span>
+      {% else %}
+        <span class="badge muted">nao encontrado</span>
+      {% endif %}
+    </p>
+    {% if youtube_token_updated_at %}
+      <p>Atualizado em (New York): <code>{{ youtube_token_updated_at }}</code></p>
+    {% endif %}
+
+    {% if youtube_client_id_configured %}
+      <a class="button-link" href="/ui/youtube/oauth/start">Gerar token YouTube</a>
+    {% else %}
+      <p class="error-text">YOUTUBE_CLIENT_ID nao configurado no .env</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Defaults do Canal</h2>
+    <form method="post" action="/ui/channel-defaults" class="form-grid">
+      <label>
+        Nome do canal
+        <input type="text" name="channel_name" value="{{ defaults.channel_name }}" required />
+      </label>
+
+      <label>
+        Idioma
+        <input type="text" name="language" value="{{ defaults.language }}" required />
+      </label>
+
+      <label>
+        Tags default (separadas por virgula)
+        <input type="text" name="default_tags" value="{{ defaults.default_tags | join(', ') }}" required />
+      </label>
+
+      <label>
+        PC config
+        <input type="text" name="pc_config" value="{{ defaults.pc_config }}" required />
+      </label>
+
+      <label>
+        Visibilidade padrao
+        <select name="default_visibility" required>
+          <option value="private" {% if defaults.default_visibility == 'private' %}selected{% endif %}>private</option>
+          <option value="unlisted" {% if defaults.default_visibility == 'unlisted' %}selected{% endif %}>unlisted</option>
+          <option value="public" {% if defaults.default_visibility == 'public' %}selected{% endif %}>public</option>
+        </select>
+      </label>
+
+      <label class="full-width">
+        Bloco padrao da descricao
+        <textarea name="default_description_block" rows="5" required>{{ defaults.default_description_block }}</textarea>
+      </label>
+
+      <button type="submit">Salvar defaults</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

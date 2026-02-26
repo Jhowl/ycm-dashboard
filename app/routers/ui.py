@@ -1,0 +1,345 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
+
+from app.db import get_db
+from app.models import ChannelDefaults, SeriesFolder, VideoAsset
+from app.services.folders import ensure_channel_defaults, sync_folders_and_videos, update_folder_steam_link
+from app.services.metadata import (
+    approve_video,
+    generate_metadata_draft,
+    reject_video,
+    update_video_settings,
+    upload_video,
+)
+from app.services.serialization import video_to_schema
+from app.services.steam import get_steam_dashboard_data, get_steam_recent_games
+from app.services.youtube_oauth import (
+    build_youtube_auth_url,
+    exchange_code_for_tokens,
+    generate_oauth_state,
+    save_token_payload,
+)
+from app.time_utils import format_datetime_ny
+
+router = APIRouter(include_in_schema=False)
+templates = Jinja2Templates(directory="app/templates")
+templates.env.filters["ny_datetime"] = format_datetime_ny
+
+
+def _youtube_token_status(token_file: str) -> tuple[bool, str | None]:
+    token_path = Path(token_file)
+    if not token_path.exists():
+        return False, None
+
+    updated_at = format_datetime_ny(datetime.fromtimestamp(token_path.stat().st_mtime, timezone.utc))
+    return True, updated_at
+
+
+@router.get("/")
+def home(request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    defaults = ensure_channel_defaults(db, settings)
+    youtube_token_exists, youtube_token_updated_at = _youtube_token_status(settings.youtube_token_file)
+    steam_data = get_steam_dashboard_data(settings)
+
+    stats = {
+        "folders_total": db.execute(select(func.count(SeriesFolder.id))).scalar_one(),
+        "folders_active": db.execute(
+            select(func.count(SeriesFolder.id)).where(SeriesFolder.active.is_(True))
+        ).scalar_one(),
+        "pending_drafts": db.execute(
+            select(func.count(VideoAsset.id)).where(VideoAsset.status.in_(["INGESTED", "DRAFT_READY"]))
+        ).scalar_one(),
+        "ready_to_upload": db.execute(
+            select(func.count(VideoAsset.id)).where(VideoAsset.status == "APPROVED")
+        ).scalar_one(),
+    }
+    folders = db.execute(select(SeriesFolder).order_by(SeriesFolder.name.asc())).scalars().all()
+
+    return templates.TemplateResponse(
+        name="home.html",
+        request=request,
+        context={
+            "defaults": defaults,
+            "stats": stats,
+            "folders": folders,
+            "video_root": settings.video_root,
+            "youtube_client_id_configured": bool(settings.youtube_client_id),
+            "youtube_redirect_uri": settings.youtube_redirect_uri,
+            "youtube_token_file": settings.youtube_token_file,
+            "youtube_token_exists": youtube_token_exists,
+            "youtube_token_updated_at": youtube_token_updated_at,
+            "steam_data": steam_data,
+        },
+    )
+
+
+@router.get("/config")
+def config_page(request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    defaults = ensure_channel_defaults(db, settings)
+    youtube_token_exists, youtube_token_updated_at = _youtube_token_status(settings.youtube_token_file)
+
+    return templates.TemplateResponse(
+        name="config.html",
+        request=request,
+        context={
+            "defaults": defaults,
+            "youtube_client_id_configured": bool(settings.youtube_client_id),
+            "youtube_redirect_uri": settings.youtube_redirect_uri,
+            "youtube_token_file": settings.youtube_token_file,
+            "youtube_token_exists": youtube_token_exists,
+            "youtube_token_updated_at": youtube_token_updated_at,
+        },
+    )
+
+
+@router.post("/ui/channel-defaults")
+def update_channel_defaults(
+    request: Request,
+    channel_name: str = Form(...),
+    language: str = Form(...),
+    default_tags: str = Form(...),
+    pc_config: str = Form(...),
+    default_description_block: str = Form(...),
+    default_visibility: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    settings = request.app.state.settings
+    defaults = ensure_channel_defaults(db, settings)
+
+    defaults.channel_name = channel_name.strip()
+    defaults.language = language.strip() or "pt-BR"
+    defaults.default_tags = [tag.strip() for tag in default_tags.split(",") if tag.strip()]
+    defaults.pc_config = pc_config.strip()
+    defaults.default_description_block = default_description_block.strip()
+    defaults.default_visibility = default_visibility
+    defaults.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+
+    target = request.headers.get("Referer") or "/config"
+    return RedirectResponse(url=target, status_code=303)
+
+
+@router.get("/folders")
+def folders_page(request: Request, include_inactive: bool = False, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    stmt = select(SeriesFolder).order_by(SeriesFolder.name.asc())
+    if not include_inactive:
+        stmt = stmt.where(SeriesFolder.active.is_(True))
+
+    folders = db.execute(stmt).scalars().all()
+    steam_games = get_steam_recent_games(settings, count=40)
+    return templates.TemplateResponse(
+        name="folders.html",
+        request=request,
+        context={
+            "folders": folders,
+            "include_inactive": include_inactive,
+            "steam_games": steam_games,
+        },
+    )
+
+
+@router.post("/ui/folders/scan")
+def scan_folders_ui(request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    steam_games = get_steam_recent_games(settings, count=40)
+    sync_folders_and_videos(db, settings, steam_games=steam_games)
+    return RedirectResponse(url="/folders", status_code=303)
+
+
+@router.post("/ui/folders/{folder_id}/steam-link")
+def update_folder_steam_link_ui(
+    folder_id: str,
+    request: Request,
+    steam_app_id: str = Form(default=""),
+    db: Session = Depends(get_db),
+):
+    settings = request.app.state.settings
+
+    if not steam_app_id:
+        target_app_id = None
+        target_game_name = None
+    else:
+        try:
+            target_app_id = int(steam_app_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="steam_app_id invalido") from exc
+
+        steam_games = get_steam_recent_games(settings, count=60)
+        game = next((item for item in steam_games if int(item.get("appid", 0)) == target_app_id), None)
+        target_game_name = game.get("name") if game else f"App {target_app_id}"
+
+    try:
+        update_folder_steam_link(db, folder_id, target_app_id, target_game_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return _redirect_back(request, fallback="/folders")
+
+
+@router.get("/series/{slug}")
+def series_page(slug: str, request: Request, db: Session = Depends(get_db)):
+    folder = db.execute(
+        select(SeriesFolder)
+        .where(SeriesFolder.slug == slug)
+        .options(selectinload(SeriesFolder.videos).selectinload(VideoAsset.drafts))
+    ).scalar_one_or_none()
+
+    if not folder:
+        raise HTTPException(status_code=404, detail="Series not found")
+
+    videos = sorted(folder.videos, key=lambda video: video.created_at, reverse=True)
+
+    return templates.TemplateResponse(
+        name="series.html",
+        request=request,
+        context={
+            "folder": folder,
+            "videos": [video_to_schema(video) for video in videos],
+        },
+    )
+
+
+def _redirect_back(request: Request, fallback: str = "/folders") -> RedirectResponse:
+    target = request.headers.get("Referer") or fallback
+    return RedirectResponse(url=target, status_code=303)
+
+
+@router.post("/ui/videos/{video_id}/generate")
+def generate_video_ui(video_id: str, request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    try:
+        generate_metadata_draft(db, settings, video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _redirect_back(request)
+
+
+@router.post("/ui/videos/{video_id}/settings")
+def update_video_settings_ui(
+    video_id: str,
+    request: Request,
+    series_number: int | None = Form(default=None),
+    thumbnail_prompt: str = Form(default=""),
+    db: Session = Depends(get_db),
+):
+    try:
+        update_video_settings(db, video_id, series_number, thumbnail_prompt)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+    return _redirect_back(request)
+
+
+@router.post("/ui/videos/{video_id}/approve")
+def approve_video_ui(video_id: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        approve_video(db, video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _redirect_back(request)
+
+
+@router.post("/ui/videos/{video_id}/reject")
+def reject_video_ui(video_id: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        reject_video(db, video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _redirect_back(request)
+
+
+@router.post("/ui/videos/{video_id}/upload")
+def upload_video_ui(video_id: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        upload_video(db, video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _redirect_back(request)
+
+
+@router.get("/ui/youtube/oauth/start")
+def youtube_oauth_start(request: Request):
+    settings = request.app.state.settings
+    state = generate_oauth_state()
+    try:
+        auth_url = build_youtube_auth_url(settings, state)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    response = RedirectResponse(url=auth_url, status_code=302)
+    response.set_cookie(
+        "youtube_oauth_state",
+        state,
+        max_age=600,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
+
+
+@router.get("/ui/youtube/oauth/callback")
+def youtube_oauth_callback(
+    request: Request,
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    expected_state = request.cookies.get("youtube_oauth_state")
+
+    if error:
+        return templates.TemplateResponse(
+            name="youtube_oauth_result.html",
+            request=request,
+            context={
+                "success": False,
+                "message": f"OAuth returned error: {error}",
+                "token_path": None,
+            },
+            status_code=400,
+        )
+
+    if not state or not expected_state or state != expected_state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    settings = request.app.state.settings
+    try:
+        token_payload = exchange_code_for_tokens(settings, code)
+        token_path = save_token_payload(settings, token_payload)
+        message = "YouTube token generated and saved successfully."
+        success = True
+    except (ValueError, RuntimeError, OSError) as exc:
+        token_path = None
+        message = str(exc)
+        success = False
+
+    response = templates.TemplateResponse(
+        name="youtube_oauth_result.html",
+        request=request,
+        context={
+            "success": success,
+            "message": message,
+            "token_path": str(token_path) if token_path else None,
+        },
+        status_code=200 if success else 500,
+    )
+    response.delete_cookie("youtube_oauth_state")
+    return response

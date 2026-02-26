@@ -1,0 +1,67 @@
+services:
+  api:
+    build: .
+    container_name: ycm-api
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
+      - ${YCM_VIDEO_ROOT:-/srv/ycm/inbox}:${YCM_VIDEO_ROOT:-/srv/ycm/inbox}
+      - ${YCM_ARTIFACTS_ROOT:-/srv/ycm/artifacts}:${YCM_ARTIFACTS_ROOT:-/srv/ycm/artifacts}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build: .
+    container_name: ycm-worker
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
+      - ${YCM_VIDEO_ROOT:-/srv/ycm/inbox}:${YCM_VIDEO_ROOT:-/srv/ycm/inbox}
+      - ${YCM_ARTIFACTS_ROOT:-/srv/ycm/artifacts}:${YCM_ARTIFACTS_ROOT:-/srv/ycm/artifacts}
+    depends_on:
+      - postgres
+      - redis
+    command: celery -A worker.celery_app.celery_app worker --loglevel=info
+
+  scheduler:
+    build: .
+    container_name: ycm-scheduler
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
+      - ${YCM_VIDEO_ROOT:-/srv/ycm/inbox}:${YCM_VIDEO_ROOT:-/srv/ycm/inbox}
+      - ${YCM_ARTIFACTS_ROOT:-/srv/ycm/artifacts}:${YCM_ARTIFACTS_ROOT:-/srv/ycm/artifacts}
+    depends_on:
+      - postgres
+      - redis
+    command: python -m scripts.scheduler
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ycm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ycm}
+      POSTGRES_USER: ${POSTGRES_USER:-ycm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ycm}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: ycm-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  pg_data:

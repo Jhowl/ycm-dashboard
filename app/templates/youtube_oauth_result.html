@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}YouTube OAuth | Result{% endblock %}
+
+{% block content %}
+<section class="card hero">
+  <h1>YouTube OAuth2</h1>
+  {% if success %}
+    <p class="ok-text">{{ message }}</p>
+    <p>Token file: <code>{{ token_path }}</code></p>
+  {% else %}
+    <p class="error-text">{{ message }}</p>
+  {% endif %}
+  <p><a href="/">Voltar para Home</a></p>
+</section>
+{% endblock %}

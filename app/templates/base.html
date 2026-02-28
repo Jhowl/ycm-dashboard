@@ -30,6 +30,17 @@
           <a href="/folders" class="{% if path.startswith('/folders') %}active{% endif %}">Folders</a>
         </nav>
 
+        {% if episode_links %}
+          <div class="sidebar-episodes">
+            <p class="sidebar-sub">Episódios</p>
+            <nav class="sidebar-nav episode-nav">
+              {% for ep in episode_links %}
+                <a href="{{ ep.href }}" class="{% if ep.active %}active{% endif %}">{{ ep.label }}</a>
+              {% endfor %}
+            </nav>
+          </div>
+        {% endif %}
+
         <div class="sidebar-foot">
           <p>Layout: dashboard desktop</p>
         </div>

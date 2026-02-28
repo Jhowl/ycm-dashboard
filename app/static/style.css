@@ -122,6 +122,23 @@ body.dashboard-body {
   background: rgba(34, 66, 92, 0.52);
 }
 
+.sidebar-episodes {
+  margin-top: 0.5rem;
+  border-top: 1px dashed var(--line);
+  padding-top: 0.55rem;
+}
+
+.episode-nav {
+  max-height: 42vh;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.episode-nav a {
+  padding: 0.44rem 0.58rem;
+  font-size: 0.84rem;
+}
+
 .sidebar-foot {
   margin-top: auto;
   padding-top: 0.7rem;
@@ -515,23 +532,75 @@ pre {
   min-width: 220px;
 }
 
-.video-list {
-  display: grid;
-  gap: 0.66rem;
+.series-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
 }
 
-.video-item {
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.video-card {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: rgba(13, 23, 34, 0.76);
-  padding: 0.72rem;
+  padding: 0.95rem;
+  min-height: 220px;
 }
 
-.video-item header {
+.video-card-top {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 0.64rem;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.video-card-top h3 {
+  margin: 0;
+  font-size: 0.96rem;
+  line-height: 1.25;
+}
+
+.video-title-link {
+  color: #dff1ff;
+  text-decoration: none;
+}
+
+.video-title-link:hover {
+  color: #8be4ff;
+  text-decoration: underline;
+}
+
+.video-card-top h3 small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-chips {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.chip {
+  border: 1px solid var(--line);
+  background: rgba(9, 18, 28, 0.72);
+  border-radius: 999px;
+  padding: 0.16rem 0.48rem;
+  font-size: 0.77rem;
+  color: #cfe0ef;
 }
 
 .status {
@@ -551,23 +620,47 @@ pre {
 }
 
 .video-settings-form {
-  margin: 0.6rem 0;
+  margin: 0.5rem 0;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.45rem;
 }
 
-.actions {
+.compact-details {
+  margin-top: 0.5rem;
+  border-top: 1px dashed var(--line);
+  padding-top: 0.45rem;
+}
+
+.compact-details > summary {
+  cursor: pointer;
+  color: #a9dfff;
+  font-weight: 600;
+  font-size: 0.86rem;
+}
+
+.video-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
 }
 
-.draft-box {
-  margin: 0.56rem 0;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(11, 24, 35, 0.78);
-  padding: 0.56rem;
+.video-actions button,
+.video-actions .button-link {
+  padding: 0.36rem 0.64rem;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 1600px) {
+  .video-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1200px) {
+  .video-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .steam-profile {
@@ -628,6 +721,82 @@ pre {
 .steam-box li span {
   color: var(--muted);
   font-size: 0.81rem;
+}
+
+.blog-meta p { margin: 0.35rem 0; }
+
+.thumb-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.thumb-tile {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.45rem;
+  background: rgba(10, 20, 31, 0.72);
+}
+
+.thumb-preview {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  margin-top: 0;
+}
+
+.thumb-tile-foot {
+  margin-top: 0.35rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.thumb-tile-foot .button-link {
+  padding: 0.28rem 0.56rem;
+  font-size: 0.74rem;
+}
+
+@media (max-width: 1700px) {
+  .thumb-gallery-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1400px) {
+  .thumb-gallery-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1100px) {
+  .thumb-gallery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.thumb-modal {
+  width: min(92vw, 1400px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #0b1520;
+  color: var(--text);
+  padding: 0.8rem;
+}
+
+.thumb-modal::backdrop {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.thumb-modal-close-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.4rem;
+}
+
+.thumb-modal-image {
+  width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--line);
 }
 
 @media (max-width: 1199px) {

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Video Settings | {{ video.filename }}{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+  <section class="card hero span-2">
+    <h1>Video Settings</h1>
+    <p><strong>{{ video.filename }}</strong></p>
+    <p>EP {{ video.series_number or 'auto' }} · {{ (video.duration_sec // 60) if video.duration_sec else 'N/A' }} min · {{ video.recorded_at | ny_datetime }}</p>
+    <p><a href="/folders">← Voltar</a></p>
+  </section>
+
+  <section class="card span-2 blog-meta">
+    <h2>Resumo do vídeo</h2>
+    {% if latest_draft %}
+      <p><strong>Título:</strong> {{ latest_draft.title_ptbr }}</p>
+      <p><strong>Tags:</strong> {{ latest_draft.tags | join(', ') }}</p>
+      <details class="compact-details"><summary>Descrição atual</summary><pre>{{ latest_draft.description_ptbr }}</pre></details>
+    {% else %}
+      <p class="muted">Sem draft ainda.</p>
+    {% endif %}
+  </section>
+
+  <section class="card span-2">
+    <h2>Imagens do Steam (jogo atual)</h2>
+    <p class="muted">Capturas publicadas no Steam para este jogo.</p>
+    <div class="thumb-gallery-grid">
+      {% for s in steam_images %}
+        <article class="thumb-tile">
+          <img src="{{ s.thumb_url }}" alt="Steam {{ s.id }}" class="thumb-preview" />
+          <div class="thumb-tile-foot">
+            <strong>Steam #{{ loop.index }}</strong>
+            <a class="button-link subtle" href="{{ s.detail_url }}" target="_blank" rel="noreferrer">Abrir</a>
+          </div>
+        </article>
+      {% else %}
+        <p class="muted">Sem imagens públicas do Steam encontradas.</p>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card span-2">
+    <h2>Opções de imagem (20 picks de cena)</h2>
+    <p class="muted">Escolha a melhor, faça download e use o prompt no ChatGPT para gerar a versão final com texto.</p>
+
+    {% if request.query_params.get('notice') == 'images_geradas' %}
+      <p class="ok-text">✅ Imagens geradas com sucesso.</p>
+    {% elif request.query_params.get('notice','').startswith('images_fila:') %}
+      <p class="ok-text">⏳ Geração enviada para background (task {{ request.query_params.get('notice').replace('images_fila:','') }}). Recarregue em alguns segundos.</p>
+    {% endif %}
+
+    <form method="post" action="/ui/video-settings/{{ video.id }}/generate-images" style="margin-bottom:0.7rem;">
+      <button type="submit">Gerar / Regerar 20 imagens</button>
+    </form>
+
+    <div class="thumb-gallery-grid">
+      {% for item in options %}
+        <article class="thumb-tile">
+          <img src="{{ item.image_url }}" alt="{{ item.label }}" class="thumb-preview js-thumb-open" data-full="{{ item.image_url }}" data-label="{{ item.label }}" />
+          <div class="thumb-tile-foot">
+            <strong>{{ item.label }}</strong>
+            <a class="button-link subtle" href="{{ item.download_url }}">Download</a>
+          </div>
+        </article>
+      {% else %}
+        <p class="muted">Nenhuma imagem gerada ainda. Clique em <strong>Gerar / Regerar 20 imagens</strong>.</p>
+      {% endfor %}
+    </div>
++
++    <dialog id="thumbModal" class="thumb-modal">
++      <form method="dialog" class="thumb-modal-close-wrap">
++        <button class="button-link subtle" value="close">Fechar</button>
++      </form>
++      <h3 id="thumbModalTitle"></h3>
++      <img id="thumbModalImage" src="" alt="Preview" class="thumb-modal-image" />
++    </dialog>
++
++    <script>
++      (() => {
++        const modal = document.getElementById('thumbModal');
++        const modalImg = document.getElementById('thumbModalImage');
++        const modalTitle = document.getElementById('thumbModalTitle');
++        if (!modal || !modalImg || !modalTitle) return;
++        document.querySelectorAll('.js-thumb-open').forEach((img) => {
++          img.addEventListener('click', () => {
++            modalImg.src = img.dataset.full || img.src;
++            modalTitle.textContent = img.dataset.label || 'Imagem';
++            modal.showModal();
++          });
++        });
++      })();
++    </script>
+
+    {% if options %}
+      <details class="compact-details" style="margin-top:0.8rem;">
+        <summary>Prompt ChatGPT (usar na imagem selecionada)</summary>
+        <pre>{{ options[0].prompt }}</pre>
+      </details>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

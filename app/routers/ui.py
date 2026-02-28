@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from celery.result import AsyncResult
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -20,9 +19,12 @@ from app.services.metadata import (
     reject_video,
     update_video_settings,
     upload_video,
+    get_latest_draft,
 )
 from app.services.serialization import video_to_schema
 from app.services.steam import get_steam_dashboard_data, get_steam_recent_games
+from app.services.steam_screenshots import fetch_steam_screenshots
+from app.services.thumbnail_lab import ensure_thumbnail_lab_assets, thumbnail_lab_dir
 from app.services.youtube_oauth import (
     build_youtube_auth_url,
     exchange_code_for_tokens,
@@ -30,7 +32,7 @@ from app.services.youtube_oauth import (
     save_token_payload,
 )
 from app.time_utils import format_datetime_ny
-from worker.tasks import upload_video_task
+from worker.tasks import upload_video_task, generate_thumbnail_options_task
 from worker.celery_app import celery_app
 
 router = APIRouter(include_in_schema=False)
@@ -271,6 +273,100 @@ def _redirect_back(request: Request, fallback: str = "/folders", notice: str | N
         query["notice"] = notice
         target = urlunparse(parsed._replace(query=urlencode(query)))
     return RedirectResponse(url=target, status_code=303)
+
+
+@router.get("/ui/thumbnail-lab/{video_id}")
+def thumbnail_lab_legacy(video_id: str):
+    return RedirectResponse(url=f"/ui/video-settings/{video_id}", status_code=302)
+
+
+@router.get("/ui/video-settings/{video_id}")
+def video_settings_page(video_id: str, request: Request, db: Session = Depends(get_db)):
+    video = db.execute(
+        select(VideoAsset).where(VideoAsset.id == video_id).options(selectinload(VideoAsset.drafts))
+    ).scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    out_dir = thumbnail_lab_dir(video.id)
+    names = sorted([p.name for p in out_dir.glob("option_*.jpg")]) if out_dir.exists() else []
+    options = []
+    for idx, name in enumerate(names, start=1):
+        asset_path = thumbnail_lab_dir(video.id) / name
+        version = int(asset_path.stat().st_mtime) if asset_path.exists() else 0
+        options.append(
+            {
+                "label": f"Opção {idx}",
+                "image_url": f"/ui/video-settings/{video.id}/asset/{name}?v={version}",
+                "download_url": f"/ui/video-settings/{video.id}/asset/{name}?download=1&v={version}",
+                "prompt": (
+                    f"Use esta imagem como base para thumbnail de YouTube do episódio {video.series_number or 'X'} de Resident Evil Requiem. "
+                    f"Adicionar texto grande e legível: EP {video.series_number or 'X'} e subtítulo curto de alto CTR. "
+                    "Manter estilo cinematográfico, alto contraste, iluminação dramática e visual limpo em 16:9."
+                ),
+            }
+        )
+
+    folder = db.get(SeriesFolder, video.folder_id)
+    settings = request.app.state.settings
+    steam_images = fetch_steam_screenshots(settings.steam_id, folder.steam_app_id if folder else None, limit=20)
+
+    episode_links = []
+    if folder:
+        siblings = db.execute(
+            select(VideoAsset).where(VideoAsset.folder_id == folder.id).order_by(VideoAsset.series_number.asc(), VideoAsset.created_at.asc())
+        ).scalars().all()
+        for sib in siblings:
+            ep = sib.series_number or 0
+            episode_links.append(
+                {
+                    "label": f"EP {ep:02d}" if ep else sib.filename,
+                    "href": f"/ui/video-settings/{sib.id}",
+                    "active": sib.id == video.id,
+                }
+            )
+
+    latest = get_latest_draft(video)
+    return templates.TemplateResponse(
+        name="thumbnail_lab.html",
+        request=request,
+        context={
+            "video": video_to_schema(video),
+            "latest_draft": latest,
+            "options": options,
+            "steam_images": steam_images,
+            "images_ready": bool(options),
+            "episode_links": episode_links,
+        },
+    )
+
+
+@router.post("/ui/video-settings/{video_id}/generate-images")
+def video_settings_generate_images(video_id: str, request: Request, db: Session = Depends(get_db)):
+    video = db.get(VideoAsset, video_id)
+    if not video:
+        return _redirect_back(request, notice="erro:Video not found")
+
+    task = generate_thumbnail_options_task.delay(video_id)
+    short_task = task.id[:8] if task.id else "sem-id"
+    return RedirectResponse(url=f"/ui/video-settings/{video_id}?notice=images_fila:{short_task}", status_code=303)
+
+
+@router.get("/ui/video-settings/{video_id}/asset/{filename}")
+def thumbnail_lab_asset(video_id: str, filename: str, download: int = 0, v: int = 0):
+    valid = {f"option_{i}.jpg" for i in range(1, 21)}
+    if filename not in valid:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    path = thumbnail_lab_dir(video_id) / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    return FileResponse(
+        path,
+        filename=filename if download else None,
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @router.post("/ui/videos/{video_id}/generate")

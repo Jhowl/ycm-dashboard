@@ -14,6 +14,15 @@
 
   <section class="card span-2">
     <h2>Videos</h2>
+    {% if notice %}
+      {% if notice.startswith('erro:') %}
+        <p class="error-text">❌ {{ notice.replace('erro:', '') }}</p>
+      {% else %}
+        <p class="ok-text">
+          {% if notice == 'video_aprovado' %}✅ Vídeo aprovado com sucesso.{% elif notice == 'video_rejeitado' %}✅ Vídeo rejeitado.{% elif notice == 'draft_gerado' %}✅ Draft gerado.{% elif notice == 'upload_concluido' %}✅ Upload concluído.{% elif notice.startswith('upload_fila:') %}⏳ Upload enviado para fila em background (task {{ notice.replace('upload_fila:', '') }}).{% else %}✅ Ação concluída.{% endif %}
+        </p>
+      {% endif %}
+    {% endif %}
     <div class="video-list">
       {% for video in videos %}
         <article class="video-item">
@@ -24,6 +33,16 @@
 
           <p>ID: <code>{{ video.id }}</code></p>
           <p>Duracao: {{ video.duration_sec or 'N/A' }}s</p>
+          <p>
+            Task upload:
+            {% if video.upload_task_status %}
+              <code>{{ video.upload_task_status }}</code>
+              {% if video.upload_task_id %}<small>({{ video.upload_task_id[:8] }})</small>{% endif %}
+              {% if video.upload_task_error %}<br><span class="error-text">{{ video.upload_task_error }}</span>{% endif %}
+            {% else %}
+              <span class="muted">sem task</span>
+            {% endif %}
+          </p>
           <p>Gravado em: {{ video.recorded_at | ny_datetime }}</p>
           <p>Numero da serie: {{ video.series_number or 'auto' }}</p>
           <p>Prompt thumbnail: {{ video.thumbnail_prompt or 'nenhum' }}</p>
@@ -33,11 +52,17 @@
               Numero da serie
               <input type="number" name="series_number" min="1" value="{{ video.series_number or '' }}" placeholder="Ex: 7" />
             </label>
+            <input type="hidden" name="thumbnail_prompt" value="{{ video.thumbnail_prompt or '' }}" />
+            <button type="submit">Salvar número da série</button>
+          </form>
+
+          <form method="post" action="/ui/videos/{{ video.id }}/settings" class="video-settings-form">
+            <input type="hidden" name="series_number" value="{{ video.series_number or '' }}" />
             <label>
               Prompt para thumbnail
-              <textarea name="thumbnail_prompt" rows="3" placeholder="Ex: Chefao no laboratorio com pouca vida">{{ video.thumbnail_prompt or '' }}</textarea>
+              <textarea name="thumbnail_prompt" rows="4" placeholder="Ex: Chefão em corredor escuro, HUD vermelho, texto EP 03">{{ video.thumbnail_prompt or '' }}</textarea>
             </label>
-            <button type="submit">Salvar serie + prompt</button>
+            <button type="submit">Salvar prompt da thumbnail</button>
           </form>
 
           {% if video.latest_draft %}
@@ -54,9 +79,6 @@
           <div class="actions">
             <form method="post" action="/ui/videos/{{ video.id }}/generate">
               <button type="submit">Gerar draft</button>
-            </form>
-            <form method="post" action="/ui/videos/{{ video.id }}/approve">
-              <button type="submit">Aprovar</button>
             </form>
             <form method="post" action="/ui/videos/{{ video.id }}/upload">
               <button type="submit">Upload</button>

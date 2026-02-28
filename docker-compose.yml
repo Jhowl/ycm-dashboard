@@ -9,7 +9,7 @@ services:
       - ${YCM_VIDEO_ROOT:-/srv/ycm/inbox}:${YCM_VIDEO_ROOT:-/srv/ycm/inbox}
       - ${YCM_ARTIFACTS_ROOT:-/srv/ycm/artifacts}:${YCM_ARTIFACTS_ROOT:-/srv/ycm/artifacts}
     ports:
-      - "8000:8000"
+      - "8010:8000"
     depends_on:
       - postgres
       - redis

@@ -32,7 +32,7 @@ def handle_telegram_command(db: Session, text: str, settings) -> str:
         return f"Video {video_id} aprovado"
 
     if action == "/upload":
-        upload_video(db, video_id)
+        upload_video(db, settings, video_id)
         return f"Video {video_id} enviado para o YouTube"
 
     if action == "/reject":

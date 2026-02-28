@@ -73,5 +73,22 @@
       <button type="submit">Salvar defaults</button>
     </form>
   </section>
+
+  <section class="card span-2">
+    <h2>Tags por jogo (defaults)</h2>
+    <p>Defina tags específicas por jogo em JSON. Exemplo:</p>
+    <pre><code>{
+  "Resident Evil 9": ["resident evil requiem", "resident evil 9 gameplay", "survival horror"],
+  "Absolum": ["absolum gameplay", "absolum pt br"]
+}</code></pre>
+
+    <form method="post" action="/ui/game-tag-defaults" class="form-grid">
+      <label class="full-width">
+        JSON de tags por jogo
+        <textarea name="game_tag_defaults_json" rows="12" required>{{ game_tag_defaults_json }}</textarea>
+      </label>
+      <button type="submit">Salvar tags por jogo</button>
+    </form>
+  </section>
 </div>
 {% endblock %}

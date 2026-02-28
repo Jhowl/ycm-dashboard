@@ -206,9 +206,10 @@ def reject_video_endpoint(video_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/videos/{video_id}/upload", response_model=JobActionOut)
-def upload_video_endpoint(video_id: str, db: Session = Depends(get_db)):
+def upload_video_endpoint(video_id: str, request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
     try:
-        uploaded = upload_video(db, video_id)
+        uploaded = upload_video(db, settings, video_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except PermissionError as exc:

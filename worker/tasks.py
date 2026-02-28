@@ -49,7 +49,23 @@ def upload_video_task(video_id: str) -> dict:
         if not video:
             raise ValueError("Video not found")
 
-        uploaded = upload_video(db, video_id)
+        try:
+            uploaded = upload_video(db, settings, video_id)
+            refreshed = db.get(VideoAsset, video_id)
+            if refreshed:
+                payload = dict(refreshed.session_payload or {})
+                payload["upload_task_status"] = "SUCCESS"
+                refreshed.session_payload = payload
+                db.commit()
 
-    logger.info("Upload simulated for video=%s", video_id)
-    return {"video_id": video_id, "uploaded_url": uploaded.uploaded_url}
+            logger.info("Upload finished for video=%s", video_id)
+            return {"video_id": video_id, "uploaded_url": uploaded.uploaded_url}
+        except Exception as exc:
+            failed = db.get(VideoAsset, video_id)
+            if failed:
+                payload = dict(failed.session_payload or {})
+                payload["upload_task_status"] = "FAILURE"
+                payload["upload_task_error"] = str(exc)[:500]
+                failed.session_payload = payload
+                db.commit()
+            raise

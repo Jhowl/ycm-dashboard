@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import httpx
 
@@ -194,3 +195,73 @@ def get_steam_dashboard_data(settings: Settings) -> dict:
         _STEAM_CACHE["data"] = payload
         _STEAM_CACHE["expires_at"] = now + timedelta(seconds=45)
         return payload
+
+
+def get_achievements_for_window(
+    settings: Settings,
+    steam_app_id: int,
+    start_utc: datetime,
+    end_utc: datetime,
+) -> list[dict[str, Any]]:
+    """Return unlocked achievements for one Steam app inside [start_utc, end_utc]."""
+    if not settings.steam_api_key or not settings.steam_id or not steam_app_id:
+        return []
+
+    if start_utc.tzinfo is None:
+        start_utc = start_utc.replace(tzinfo=timezone.utc)
+    else:
+        start_utc = start_utc.astimezone(timezone.utc)
+
+    if end_utc.tzinfo is None:
+        end_utc = end_utc.replace(tzinfo=timezone.utc)
+    else:
+        end_utc = end_utc.astimezone(timezone.utc)
+
+    if end_utc < start_utc:
+        start_utc, end_utc = end_utc, start_utc
+
+    start_ts = int(start_utc.timestamp())
+    end_ts = int(end_utc.timestamp())
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get(
+                "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/",
+                params={
+                    "key": settings.steam_api_key,
+                    "steamid": settings.steam_id,
+                    "appid": steam_app_id,
+                    "l": "portuguese",
+                },
+            )
+            response.raise_for_status()
+            body = response.json()
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        return []
+
+    playerstats = body.get("playerstats", {})
+    game_name = playerstats.get("gameName") or f"App {steam_app_id}"
+    selected: list[dict[str, Any]] = []
+
+    for item in playerstats.get("achievements", []):
+        if int(item.get("achieved", 0)) != 1:
+            continue
+        unlock_ts = int(item.get("unlocktime", 0))
+        if unlock_ts <= 0:
+            continue
+        if unlock_ts < start_ts or unlock_ts > end_ts:
+            continue
+
+        name = item.get("name") or item.get("apiname") or "Conquista"
+        selected.append(
+            {
+                "name": str(name),
+                "unlocktime": unlock_ts,
+                "unlocktime_label": _format_utc_datetime(datetime.fromtimestamp(unlock_ts, timezone.utc)),
+                "game": game_name,
+                "appid": steam_app_id,
+            }
+        )
+
+    selected.sort(key=lambda x: x["unlocktime"])
+    return selected

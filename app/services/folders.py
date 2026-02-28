@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from slugify import slugify
@@ -14,6 +15,7 @@ from app.config import Settings
 from app.models import ChannelDefaults, SeriesFolder, VideoAsset
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm"}
+LOCAL_TZ = ZoneInfo("America/New_York")
 
 
 def ensure_channel_defaults(db: Session, settings: Settings) -> ChannelDefaults:
@@ -53,14 +55,17 @@ def _unique_slug(base_slug: str, used_slugs: set[str]) -> str:
 
 def parse_recorded_at_from_filename(filename: str) -> datetime | None:
     # Supports: 2026-02-26_21-10-00 or 2026-02-26 21-10-00
+    # Treat filename timestamp as local machine time (America/New_York),
+    # then convert/store as UTC for consistent DB comparisons.
     match = re.search(r"(\d{4}-\d{2}-\d{2})[ _](\d{2})[-:](\d{2})[-:](\d{2})", filename)
     if not match:
         return None
 
     date_part, hour, minute, second = match.groups()
-    value = f"{date_part}T{hour}:{minute}:{second}+00:00"
+    naive_value = f"{date_part}T{hour}:{minute}:{second}"
     try:
-        return datetime.fromisoformat(value)
+        local_dt = datetime.fromisoformat(naive_value).replace(tzinfo=LOCAL_TZ)
+        return local_dt.astimezone(timezone.utc)
     except ValueError:
         return None
 

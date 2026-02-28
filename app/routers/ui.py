@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from celery.result import AsyncResult
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.db import get_db
 from app.models import ChannelDefaults, SeriesFolder, VideoAsset
 from app.services.folders import ensure_channel_defaults, sync_folders_and_videos, update_folder_steam_link
+from app.services.game_defaults import game_tag_defaults_text, save_game_tag_defaults
 from app.services.metadata import (
     approve_video,
     generate_metadata_draft,
@@ -28,6 +30,8 @@ from app.services.youtube_oauth import (
     save_token_payload,
 )
 from app.time_utils import format_datetime_ny
+from worker.tasks import upload_video_task
+from worker.celery_app import celery_app
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory="app/templates")
@@ -98,6 +102,7 @@ def config_page(request: Request, db: Session = Depends(get_db)):
             "youtube_token_file": settings.youtube_token_file,
             "youtube_token_exists": youtube_token_exists,
             "youtube_token_updated_at": youtube_token_updated_at,
+            "game_tag_defaults_json": game_tag_defaults_text(),
         },
     )
 
@@ -128,6 +133,35 @@ def update_channel_defaults(
 
     target = request.headers.get("Referer") or "/config"
     return RedirectResponse(url=target, status_code=303)
+
+
+@router.post("/ui/game-tag-defaults")
+def update_game_tag_defaults(
+    request: Request,
+    game_tag_defaults_json: str = Form(...),
+):
+    import json
+
+    try:
+        payload = json.loads(game_tag_defaults_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"JSON invalido: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Formato invalido: use objeto JSON {\"Jogo\": [\"tag1\", ...]}")
+
+    normalized: dict[str, list[str]] = {}
+    for game, tags in payload.items():
+        if not isinstance(game, str) or not game.strip():
+            continue
+        if not isinstance(tags, list):
+            continue
+        values = [str(tag).strip() for tag in tags if str(tag).strip()]
+        if values:
+            normalized[game.strip()] = values
+
+    save_game_tag_defaults(normalized)
+    return _redirect_back(request, fallback="/config")
 
 
 @router.get("/folders")
@@ -200,19 +234,42 @@ def series_page(slug: str, request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Series not found")
 
     videos = sorted(folder.videos, key=lambda video: video.created_at, reverse=True)
+    video_cards = []
+    for video in videos:
+        schema = video_to_schema(video)
+        payload = video.session_payload or {}
+        task_id = payload.get("upload_task_id")
+        task_status = None
+        if isinstance(task_id, str) and task_id:
+            result = AsyncResult(task_id, app=celery_app)
+            task_status = (result.status or "").upper() or None
+
+        card = schema.model_dump()
+        card["upload_task_id"] = task_id
+        card["upload_task_status"] = task_status or payload.get("upload_task_status")
+        card["upload_task_error"] = payload.get("upload_task_error")
+        video_cards.append(card)
 
     return templates.TemplateResponse(
         name="series.html",
         request=request,
         context={
             "folder": folder,
-            "videos": [video_to_schema(video) for video in videos],
+            "videos": video_cards,
+            "notice": request.query_params.get("notice"),
         },
     )
 
 
-def _redirect_back(request: Request, fallback: str = "/folders") -> RedirectResponse:
+def _redirect_back(request: Request, fallback: str = "/folders", notice: str | None = None) -> RedirectResponse:
+    from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
     target = request.headers.get("Referer") or fallback
+    if notice:
+        parsed = urlparse(target)
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        query["notice"] = notice
+        target = urlunparse(parsed._replace(query=urlencode(query)))
     return RedirectResponse(url=target, status_code=303)
 
 
@@ -223,7 +280,7 @@ def generate_video_ui(video_id: str, request: Request, db: Session = Depends(get
         generate_metadata_draft(db, settings, video_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _redirect_back(request)
+    return _redirect_back(request, notice="draft_gerado")
 
 
 @router.post("/ui/videos/{video_id}/settings")
@@ -250,7 +307,7 @@ def approve_video_ui(video_id: str, request: Request, db: Session = Depends(get_
         approve_video(db, video_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _redirect_back(request)
+    return _redirect_back(request, notice="video_aprovado")
 
 
 @router.post("/ui/videos/{video_id}/reject")
@@ -259,18 +316,25 @@ def reject_video_ui(video_id: str, request: Request, db: Session = Depends(get_d
         reject_video(db, video_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _redirect_back(request)
+    return _redirect_back(request, notice="video_rejeitado")
 
 
 @router.post("/ui/videos/{video_id}/upload")
 def upload_video_ui(video_id: str, request: Request, db: Session = Depends(get_db)):
-    try:
-        upload_video(db, video_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _redirect_back(request)
+    video = db.get(VideoAsset, video_id)
+    if not video:
+        return _redirect_back(request, notice="erro:Video not found")
+
+    task = upload_video_task.delay(video_id)
+    if task.id:
+        payload = dict(video.session_payload or {})
+        payload["upload_task_id"] = task.id
+        payload["upload_task_status"] = "PENDING"
+        video.session_payload = payload
+        db.commit()
+
+    short_task = task.id[:8] if task.id else "sem-id"
+    return _redirect_back(request, notice=f"upload_fila:{short_task}")
 
 
 @router.get("/ui/youtube/oauth/start")

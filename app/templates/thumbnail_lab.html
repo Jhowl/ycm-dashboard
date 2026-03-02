@@ -28,7 +28,7 @@
     <div class="thumb-gallery-grid">
       {% for s in steam_images %}
         <article class="thumb-tile">
-          <img src="{{ s.thumb_url }}" alt="Steam {{ s.id }}" class="thumb-preview" />
+          <img src="{{ s.thumb_url }}" alt="Steam {{ s.id }}" class="thumb-preview js-thumb-open" data-full="{{ s.thumb_url }}" data-label="Steam #{{ loop.index }}" />
           <div class="thumb-tile-foot">
             <strong>Steam #{{ loop.index }}</strong>
             <a class="button-link subtle" href="{{ s.detail_url }}" target="_blank" rel="noreferrer">Abrir</a>
@@ -67,30 +67,38 @@
         <p class="muted">Nenhuma imagem gerada ainda. Clique em <strong>Gerar / Regerar 20 imagens</strong>.</p>
       {% endfor %}
     </div>
-+
-+    <dialog id="thumbModal" class="thumb-modal">
-+      <form method="dialog" class="thumb-modal-close-wrap">
-+        <button class="button-link subtle" value="close">Fechar</button>
-+      </form>
-+      <h3 id="thumbModalTitle"></h3>
-+      <img id="thumbModalImage" src="" alt="Preview" class="thumb-modal-image" />
-+    </dialog>
-+
-+    <script>
-+      (() => {
-+        const modal = document.getElementById('thumbModal');
-+        const modalImg = document.getElementById('thumbModalImage');
-+        const modalTitle = document.getElementById('thumbModalTitle');
-+        if (!modal || !modalImg || !modalTitle) return;
-+        document.querySelectorAll('.js-thumb-open').forEach((img) => {
-+          img.addEventListener('click', () => {
-+            modalImg.src = img.dataset.full || img.src;
-+            modalTitle.textContent = img.dataset.label || 'Imagem';
-+            modal.showModal();
-+          });
-+        });
-+      })();
-+    </script>
+
+    <dialog id="thumbModal" class="thumb-modal">
+      <form method="dialog" class="thumb-modal-close-wrap">
+        <button class="button-link subtle" value="close">Fechar</button>
+      </form>
+      <h3 id="thumbModalTitle"></h3>
+      <img id="thumbModalImage" src="" alt="Preview" class="thumb-modal-image" />
+    </dialog>
+
+    <script>
+      (() => {
+        const modal = document.getElementById('thumbModal');
+        const modalImg = document.getElementById('thumbModalImage');
+        const modalTitle = document.getElementById('thumbModalTitle');
+        const thumbs = document.querySelectorAll('.js-thumb-open');
+        thumbs.forEach((img) => {
+          img.style.cursor = 'zoom-in';
+          img.addEventListener('click', () => {
+            const src = img.dataset.full || img.src;
+            const label = img.dataset.label || 'Imagem';
+
+            if (modal && typeof modal.showModal === 'function' && modalImg && modalTitle) {
+              modalImg.src = src;
+              modalTitle.textContent = label;
+              modal.showModal();
+            } else {
+              window.open(src, '_blank', 'noopener,noreferrer');
+            }
+          });
+        });
+      })();
+    </script>
 
     {% if options %}
       <details class="compact-details" style="margin-top:0.8rem;">

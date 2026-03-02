@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Achievement Cuts{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+  <section class="card span-2">
+    <h1>Achievement Cuts</h1>
+    <p><code>{{ cuts_dir }}</code></p>
+    <p class="muted">{{ cuts|length }} arquivos</p>
+  </section>
+
+  <section class="card span-2">
+    <div class="video-list">
+      {% for c in cuts %}
+        <article class="video-item">
+          <header>
+            <h3>{{ c.name }}</h3>
+            <span class="status">{{ c.size_mb }} MB</span>
+          </header>
+          <p class="muted">modificado: {{ c.mtime }}</p>
+          <div class="video-actions">
+            <a class="button-link subtle" href="/ui/cuts/file/{{ c.name }}" target="_blank" rel="noreferrer">Abrir</a>
+            <a class="button-link subtle" href="/ui/cuts/file/{{ c.name }}?download=1">Download</a>
+          </div>
+        </article>
+      {% else %}
+        <p class="muted">Nenhum corte encontrado ainda.</p>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}

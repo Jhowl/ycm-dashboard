@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+import random
+import time
 
 from app.models import VideoAsset
 
@@ -68,6 +70,16 @@ def ensure_thumbnail_lab_assets(video: VideoAsset, force_regen: bool = False) ->
     for a in anchors:
         if a not in dedup:
             dedup.append(a)
+
+    # Re-generate with variation (so button does not return same exact set every time)
+    rng = random.Random(int(time.time()))
+    if force_regen:
+        varied: list[int] = []
+        for a in dedup:
+            jitter = rng.randint(-18, 18)
+            varied.append(max(1, min(duration - 1, a + jitter)))
+        dedup = varied
+        rng.shuffle(dedup)
 
     gpu_args = _gpu_ffmpeg_args()
 

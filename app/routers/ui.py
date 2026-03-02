@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from celery.result import AsyncResult
@@ -350,6 +351,34 @@ def video_settings_generate_images(video_id: str, request: Request, db: Session 
     task = generate_thumbnail_options_task.delay(video_id)
     short_task = task.id[:8] if task.id else "sem-id"
     return RedirectResponse(url=f"/ui/video-settings/{video_id}?notice=images_fila:{short_task}", status_code=303)
+
+
+@router.get("/cuts")
+def cuts_page(request: Request):
+    cuts_dir = Path('/mnt/animes/ycm-inbox/Resident Evil 9/archimevments')
+    items = []
+    if cuts_dir.exists():
+        for p in sorted(cuts_dir.glob('*.mp4'), key=lambda x: x.stat().st_mtime, reverse=True):
+            st = p.stat()
+            items.append({
+                'name': p.name,
+                'size_mb': round(st.st_size / (1024 * 1024), 2),
+                'mtime': format_datetime_ny(datetime.fromtimestamp(st.st_mtime, timezone.utc)),
+            })
+    return templates.TemplateResponse(
+        name='cuts.html',
+        request=request,
+        context={'cuts': items, 'cuts_dir': str(cuts_dir)},
+    )
+
+
+@router.get('/ui/cuts/file/{filename}')
+def cuts_file(filename: str, download: int = 0):
+    safe = Path(filename).name
+    path = Path('/mnt/animes/ycm-inbox/Resident Evil 9/archimevments') / safe
+    if not path.exists() or path.suffix.lower() != '.mp4':
+        raise HTTPException(status_code=404, detail='File not found')
+    return FileResponse(path, filename=safe if download else None)
 
 
 @router.get("/ui/video-settings/{video_id}/asset/{filename}")

@@ -2,7 +2,7 @@
 
 Linux-hosted, folder-first YouTube workflow for gameplay channels.
 
-The project scans game folders, ingests videos, generates PT-BR metadata drafts, supports manual approval, and manages the process via dashboard + API + Telegram commands.
+The project scans game folders, ingests videos, generates PT-BR metadata drafts, and manages upload + monitoring via dashboard + API + Telegram commands.
 
 ## What it does
 
@@ -12,15 +12,18 @@ The project scans game folders, ingests videos, generates PT-BR metadata drafts,
 - Generate draft title/description/tags in Portuguese (`pt-BR`).
 - Generate thumbnail images with `ffmpeg` and optional per-video prompt.
 - Link each folder to a Steam game from your profile.
-- Enforce approval before upload action.
+- Upload to YouTube (real upload with OAuth token + refresh token).
 - Support YouTube OAuth token generation from the UI.
 - Expose API endpoints for MCP/agent integrations.
+- Video Settings page with 20 scene-based thumbnail options.
+- Achievement cuts page (`/cuts`) with playback/download.
 
-## Current v1 behavior
+## Current behavior
 
-- Upload is currently simulated (`uploaded_url` is mock).
-- Metadata generation is deterministic template-based (no live LLM call yet).
-- UI is desktop-first (mobile is intentionally limited).
+- Upload can run in real mode (YouTube Data API) or dry-run mode via env (`YCM_DRY_RUN`).
+- Metadata generation is template-based and can be edited per video.
+- Upload and thumbnail regeneration run in background tasks (Celery).
+- UI supports desktop/tablet responsive layout.
 
 ## Stack
 
@@ -46,7 +49,7 @@ docker compose up --build -d
 3. Open dashboard:
 
 ```text
-http://localhost:8000/
+http://localhost:8010/
 ```
 
 4. Run first scan:
@@ -65,14 +68,16 @@ http://localhost:8000/
 3. Open series page (`/series/<slug>`).
 4. Optionally set per-video `series_number` and `thumbnail_prompt`.
 5. Generate draft.
-6. Approve.
-7. Upload (simulated in v1).
+6. Upload (auto-generates draft if missing).
+7. Track task status in series page.
 
 ## UI routes
 
 - `/` Home dashboard (stats, token status, Steam summary, folder list)
 - `/folders` Folder discovery and Steam link mapping
-- `/series/<slug>` Video actions and draft workflow
+- `/series/<slug>` Video cards, actions, and draft workflow
+- `/ui/video-settings/<video_id>` Single-page video settings + thumbnail gallery
+- `/cuts` Achievement cuts list with open/download
 - `/config` Channel defaults and YouTube OAuth setup
 - `/ui/youtube/oauth/start` Start OAuth flow
 - `/ui/youtube/oauth/callback` OAuth callback route
@@ -83,7 +88,7 @@ http://localhost:8000/
 - `YOUTUBE_CLIENT_ID`
 - `YOUTUBE_CLIENT_SECRET`
 2. Ensure redirect URI in Google Console matches exactly:
-- `http://localhost:8000/ui/youtube/oauth/callback`
+- `http://localhost:8010/ui/youtube/oauth/callback`
 3. Open `/config` and click `Gerar token YouTube`.
 4. Token file is saved at `YCM_YOUTUBE_TOKEN_FILE` (default `./data/youtube_token.json`).
 

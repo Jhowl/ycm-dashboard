@@ -17,6 +17,7 @@ The project scans game folders, ingests videos, generates PT-BR metadata drafts,
 - Expose API endpoints for MCP/agent integrations.
 - Video Settings page with 20 scene-based thumbnail options.
 - Achievement cuts page (`/cuts`) with playback/download.
+- Achievement cut pipeline: generates Full HD clips around achievement unlock timing.
 
 ## Current behavior
 
@@ -79,6 +80,7 @@ http://localhost:8010/
 - `/ui/video-settings/<video_id>` Single-page video settings + thumbnail gallery
 - `/cuts` Achievement cuts list with open/download
 - `/config` Channel defaults and YouTube OAuth setup
+- `/ui/video-settings/{video_id}/generate-images` Async regenerate thumbnail options
 - `/ui/youtube/oauth/start` Start OAuth flow
 - `/ui/youtube/oauth/callback` OAuth callback route
 
@@ -136,6 +138,16 @@ Run tests in container:
 ```bash
 docker compose exec -T api pytest -q
 ```
+
+### Achievement cuts (Full HD)
+
+Cuts are stored at:
+
+```text
+/mnt/animes/ycm-inbox/Resident Evil 9/archimevments
+```
+
+Current flow can generate clips around achievement unlock points (e.g., start before unlock and end shortly after).
 
 Useful commands:
 

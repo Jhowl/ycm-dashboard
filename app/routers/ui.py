@@ -3,29 +3,30 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from celery.result import AsyncResult
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.models import ChannelDefaults, SeriesFolder, VideoAsset
-from app.services.folders import ensure_channel_defaults, sync_folders_and_videos, update_folder_steam_link
+from app.models import SeriesFolder, VideoAsset
+from app.services.channel import get_or_create_channel_defaults, update_channel_defaults_from_form
+from app.services.dashboard import build_home_stats, get_youtube_token_status
+from app.services.folders import sync_folders_and_videos, update_folder_steam_link
 from app.services.game_defaults import game_tag_defaults_text, save_game_tag_defaults
 from app.services.metadata import (
     approve_video,
     generate_metadata_draft,
     reject_video,
     update_video_settings,
-    upload_video,
     get_latest_draft,
 )
 from app.services.serialization import video_to_schema
 from app.services.steam import get_steam_dashboard_data, get_steam_recent_games
 from app.services.steam_screenshots import fetch_steam_screenshots
-from app.services.thumbnail_lab import ensure_thumbnail_lab_assets, thumbnail_lab_dir
+from app.services.thumbnail_lab import thumbnail_lab_dir
 from app.services.youtube_oauth import (
     build_youtube_auth_url,
     exchange_code_for_tokens,
@@ -41,34 +42,12 @@ templates = Jinja2Templates(directory="app/templates")
 templates.env.filters["ny_datetime"] = format_datetime_ny
 
 
-def _youtube_token_status(token_file: str) -> tuple[bool, str | None]:
-    token_path = Path(token_file)
-    if not token_path.exists():
-        return False, None
-
-    updated_at = format_datetime_ny(datetime.fromtimestamp(token_path.stat().st_mtime, timezone.utc))
-    return True, updated_at
-
-
 @router.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
-    defaults = ensure_channel_defaults(db, settings)
-    youtube_token_exists, youtube_token_updated_at = _youtube_token_status(settings.youtube_token_file)
+    defaults = get_or_create_channel_defaults(db, settings)
+    youtube_token_exists, youtube_token_updated_at = get_youtube_token_status(settings.youtube_token_file)
     steam_data = get_steam_dashboard_data(settings)
-
-    stats = {
-        "folders_total": db.execute(select(func.count(SeriesFolder.id))).scalar_one(),
-        "folders_active": db.execute(
-            select(func.count(SeriesFolder.id)).where(SeriesFolder.active.is_(True))
-        ).scalar_one(),
-        "pending_drafts": db.execute(
-            select(func.count(VideoAsset.id)).where(VideoAsset.status.in_(["INGESTED", "DRAFT_READY"]))
-        ).scalar_one(),
-        "ready_to_upload": db.execute(
-            select(func.count(VideoAsset.id)).where(VideoAsset.status == "APPROVED")
-        ).scalar_one(),
-    }
     folders = db.execute(select(SeriesFolder).order_by(SeriesFolder.name.asc())).scalars().all()
 
     return templates.TemplateResponse(
@@ -76,7 +55,7 @@ def home(request: Request, db: Session = Depends(get_db)):
         request=request,
         context={
             "defaults": defaults,
-            "stats": stats,
+            "stats": build_home_stats(db),
             "folders": folders,
             "video_root": settings.video_root,
             "youtube_client_id_configured": bool(settings.youtube_client_id),
@@ -92,8 +71,8 @@ def home(request: Request, db: Session = Depends(get_db)):
 @router.get("/config")
 def config_page(request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
-    defaults = ensure_channel_defaults(db, settings)
-    youtube_token_exists, youtube_token_updated_at = _youtube_token_status(settings.youtube_token_file)
+    defaults = get_or_create_channel_defaults(db, settings)
+    youtube_token_exists, youtube_token_updated_at = get_youtube_token_status(settings.youtube_token_file)
 
     return templates.TemplateResponse(
         name="config.html",
@@ -122,15 +101,16 @@ def update_channel_defaults(
     db: Session = Depends(get_db),
 ):
     settings = request.app.state.settings
-    defaults = ensure_channel_defaults(db, settings)
-
-    defaults.channel_name = channel_name.strip()
-    defaults.language = language.strip() or "pt-BR"
-    defaults.default_tags = [tag.strip() for tag in default_tags.split(",") if tag.strip()]
-    defaults.pc_config = pc_config.strip()
-    defaults.default_description_block = default_description_block.strip()
-    defaults.default_visibility = default_visibility
-    defaults.updated_at = datetime.now(timezone.utc)
+    defaults = get_or_create_channel_defaults(db, settings)
+    update_channel_defaults_from_form(
+        defaults,
+        channel_name=channel_name,
+        language=language,
+        default_tags=default_tags,
+        pc_config=pc_config,
+        default_description_block=default_description_block,
+        default_visibility=default_visibility,
+    )
 
     db.commit()
 
@@ -355,7 +335,8 @@ def video_settings_generate_images(video_id: str, request: Request, db: Session 
 
 @router.get("/cuts")
 def cuts_page(request: Request):
-    cuts_dir = Path('/mnt/animes/ycm-inbox/Resident Evil 9/archimevments')
+    settings = request.app.state.settings
+    cuts_dir = Path(settings.cuts_root)
     items = []
     if cuts_dir.exists():
         for p in sorted(cuts_dir.glob('*.mp4'), key=lambda x: x.stat().st_mtime, reverse=True):
@@ -373,9 +354,10 @@ def cuts_page(request: Request):
 
 
 @router.get('/ui/cuts/file/{filename}')
-def cuts_file(filename: str, download: int = 0):
+def cuts_file(filename: str, request: Request, download: int = 0):
+    settings = request.app.state.settings
     safe = Path(filename).name
-    path = Path('/mnt/animes/ycm-inbox/Resident Evil 9/archimevments') / safe
+    path = Path(settings.cuts_root) / safe
     if not path.exists() or path.suffix.lower() != '.mp4':
         raise HTTPException(status_code=404, detail='File not found')
     return FileResponse(path, filename=safe if download else None)
@@ -449,6 +431,8 @@ def upload_video_ui(video_id: str, request: Request, db: Session = Depends(get_d
     video = db.get(VideoAsset, video_id)
     if not video:
         return _redirect_back(request, notice="erro:Video not found")
+    if video.status != "APPROVED":
+        return _redirect_back(request, notice="erro:Aprove o video antes do upload")
 
     task = upload_video_task.delay(video_id)
     if task.id:

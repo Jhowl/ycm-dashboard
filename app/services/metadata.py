@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import shutil
-import subprocess
 from datetime import timedelta
 from pathlib import Path
 
@@ -10,7 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models import ChannelDefaults, MetadataDraft, SeriesFolder, VideoAsset, VideoStatus
+from app.services.channel import get_or_create_channel_defaults
+from app.services.errors import ConflictError, NotFoundError, ValidationError
 from app.services.game_defaults import get_game_tag_defaults
+from app.services.media import EpisodeThumbnailRenderer
 from app.services.steam import get_achievements_for_window
 from app.services.youtube_publish import upload_video_to_youtube
 
@@ -18,287 +19,283 @@ from app.services.youtube_publish import upload_video_to_youtube
 def get_latest_draft(video: VideoAsset) -> MetadataDraft | None:
     if not video.drafts:
         return None
-    ordered = sorted(video.drafts, key=lambda d: (d.version, d.created_at), reverse=True)
-    return ordered[0]
+    return sorted(video.drafts, key=lambda draft: (draft.version, draft.created_at), reverse=True)[0]
 
 
-def _next_draft_version(video: VideoAsset) -> int:
-    latest = get_latest_draft(video)
-    if not latest:
-        return 1
-    return latest.version + 1
+def get_latest_active_draft(video: VideoAsset) -> MetadataDraft | None:
+    active = [draft for draft in video.drafts if draft.is_active]
+    if not active:
+        return get_latest_draft(video)
+    return sorted(active, key=lambda draft: (draft.version, draft.created_at), reverse=True)[0]
 
 
-def _extract_episode_number(db: Session, video: VideoAsset) -> int:
-    videos = db.execute(
-        select(VideoAsset)
-        .where(VideoAsset.folder_id == video.folder_id)
-        .order_by(VideoAsset.recorded_at.is_(None), VideoAsset.recorded_at.asc(), VideoAsset.created_at.asc())
-    ).scalars()
+class MetadataWorkflowService:
+    def __init__(self, db: Session, settings: Settings | None = None):
+        self.db = db
+        self.settings = settings
 
-    for index, item in enumerate(videos, start=1):
-        if item.id == video.id:
-            return index
+    def generate_draft(self, video_id: str) -> MetadataDraft:
+        settings = self._require_settings()
+        video = self._get_video(video_id)
+        folder = self._get_folder(video.folder_id)
+        defaults = get_or_create_channel_defaults(self.db, settings)
 
-    return 1
+        self._sync_steam_achievements(folder, video)
 
+        episode_number = self._resolve_episode_number(video)
+        title = self._build_title(folder, video, episode_number)
+        description = self._build_description(folder, video, defaults, episode_number)
+        tags = self._build_tags(folder, defaults)
 
-def _resolve_episode_number(db: Session, video: VideoAsset) -> int:
-    if video.series_number and video.series_number > 0:
-        return video.series_number
-    return _extract_episode_number(db, video)
+        for draft in video.drafts:
+            draft.is_active = False
 
-
-def _build_tags(folder: SeriesFolder, defaults: ChannelDefaults) -> list[str]:
-    tags = [folder.name.lower(), "gameplay", "sem comentarios", "pt-br"]
-    tags.extend(defaults.default_tags)
-
-    per_game = get_game_tag_defaults()
-    folder_key = folder.name.strip().lower()
-    matched_tags: list[str] = []
-    for game_name, game_tags in per_game.items():
-        game_key = game_name.strip().lower()
-        if not game_key:
-            continue
-        if game_key == folder_key or game_key in folder_key or folder_key in game_key:
-            matched_tags.extend(game_tags)
-
-    tags.extend(matched_tags)
-
-    normalized: list[str] = []
-    seen = set()
-    for tag in tags:
-        clean = " ".join(tag.split()).strip()
-        if not clean:
-            continue
-        key = clean.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized.append(clean)
-
-    return normalized[:15]
-
-
-def _build_description(
-    folder: SeriesFolder,
-    video: VideoAsset,
-    defaults: ChannelDefaults,
-    episode_number: int,
-) -> str:
-    payload = video.session_payload or {}
-    achievements = payload.get("achievements_unlocked") or []
-    playtime = payload.get("playtime_minutes")
-
-    duration_minutes = (video.duration_sec // 60) if video.duration_sec else None
-    duration = f"{duration_minutes} minutos" if duration_minutes is not None else "duracao indisponivel"
-
-    folder_name = (folder.name or "").lower()
-    is_requiem = "resident evil" in folder_name or "requiem" in folder_name
-
-    if is_requiem:
-        lines = [
-            f"No episódio {episode_number:02d} de Resident Evil Requiem (Resident Evil 9), acompanhe gameplay sem comentários em PT-BR com foco na progressão da campanha, exploração, combate e clima de survival horror.",
-            "",
-            "🎮 Conteúdo deste vídeo:",
-            "- Gameplay sem comentários (no commentary)",
-            "- Trechos com Claire e Leon",
-            "- Exploração + combate + progressão de história",
-            "- Conquistas desbloqueadas durante a gameplay",
-            "",
-            f"🧟 Jogo: {folder.name}",
-            f"🌍 Idioma: {defaults.language}",
-            f"🖥️ Plataforma: PC ({defaults.pc_config})",
-            f"⏱️ Duração: ~{duration_minutes} min" if duration_minutes is not None else "⏱️ Duração: indisponível",
-        ]
-        if playtime is not None:
-            lines.append(f"🕹️ Playtime Steam no período: {playtime} minutos")
-        if achievements:
-            lines.append("🏆 Conquistas desbloqueadas: " + ", ".join(str(a) for a in achievements))
-        else:
-            lines.append("🏆 Conquistas desbloqueadas: sem novas conquistas registradas")
-
-        lines.extend([
-            "",
-            "Se curtir, deixa o like e se inscreve para acompanhar a série completa.",
-            "Canal: https://www.youtube.com/@aggresiveHamster",
-            "",
-            "#ResidentEvilRequiem #ResidentEvil9 #GameplayPTBR #SemComentarios #SurvivalHorror",
-        ])
-        return "\n".join(lines)
-
-    lines = [
-        f"Serie: {folder.name}",
-        f"Episodio: {episode_number:02d}",
-        f"Idioma: {defaults.language}",
-        f"Formato: gameplay sem comentarios",
-        f"Duracao aproximada: {duration}",
-    ]
-
-    if playtime is not None:
-        lines.append(f"Playtime Steam no periodo: {playtime} minutos")
-
-    if achievements:
-        lines.append("Conquistas desbloqueadas: " + ", ".join(str(a) for a in achievements))
-    else:
-        lines.append("Conquistas desbloqueadas: sem novas conquistas registradas")
-
-    lines.append(f"PC: {defaults.pc_config}")
-    lines.append("")
-    lines.append(defaults.default_description_block)
-
-    return "\n".join(lines)
-
-
-def _escape_drawtext_value(value: str) -> str:
-    escaped = value.replace("\\", "\\\\")
-    escaped = escaped.replace(":", "\\:")
-    escaped = escaped.replace("'", "\\'")
-    escaped = escaped.replace("%", "\\%")
-    escaped = escaped.replace("\n", " ")
-    return escaped
-
-
-def _generate_thumbnail(
-    video_path: Path,
-    output_path: Path,
-    episode_number: int,
-    thumbnail_prompt: str | None,
-) -> str | None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    base_path = output_path.with_name(f"{output_path.stem}_base{output_path.suffix}")
-
-    command = [
-        "ffmpeg",
-        "-y",
-        "-ss",
-        "00:00:05",
-        "-i",
-        str(video_path),
-        "-frames:v",
-        "1",
-        str(base_path),
-    ]
-
-    try:
-        subprocess.run(command, capture_output=True, check=True, timeout=30)
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-
-    headline = f"EP {episode_number:02d}"
-    prompt_text = (thumbnail_prompt or "").strip()
-    if prompt_text:
-        prompt_text = prompt_text[:70]
-
-    draw_filters = [
-        "drawbox=x=0:y=ih-160:w=iw:h=160:color=black@0.58:t=fill",
-        (
-            "drawtext=text='{}':x=30:y=ih-132:fontsize=56:fontcolor=white:"
-            "box=0:shadowcolor=black@0.8:shadowx=2:shadowy=2"
-        ).format(_escape_drawtext_value(headline)),
-    ]
-    if prompt_text:
-        draw_filters.append(
-            (
-                "drawtext=text='{}':x=30:y=ih-66:fontsize=34:fontcolor=white:"
-                "box=0:shadowcolor=black@0.8:shadowx=2:shadowy=2"
-            ).format(_escape_drawtext_value(prompt_text))
+        draft = MetadataDraft(
+            video_id=video.id,
+            title_ptbr=title,
+            description_ptbr=description,
+            tags=tags,
+            thumbnail_path=self._generate_thumbnail(video, episode_number),
+            model_provider=settings.default_model_provider,
+            language=defaults.language,
+            version=self._next_draft_version(video),
+            is_active=True,
         )
 
-    overlay_command = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(base_path),
-        "-vf",
-        ",".join(draw_filters),
-        str(output_path),
-    ]
+        video.status = VideoStatus.DRAFT_READY.value
+        self.db.add(draft)
+        self.db.commit()
+        self.db.refresh(draft)
+        return draft
 
-    try:
-        subprocess.run(overlay_command, capture_output=True, check=True, timeout=30)
-        return str(output_path)
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-        try:
-            shutil.copyfile(base_path, output_path)
-            return str(output_path)
-        except OSError:
-            return str(base_path)
-    finally:
-        if base_path.exists():
-            base_path.unlink(missing_ok=True)
+    def update_video_settings(
+        self,
+        video_id: str,
+        series_number: int | None,
+        thumbnail_prompt: str | None,
+    ) -> VideoAsset:
+        video = self._get_video(video_id)
+        if series_number is not None and series_number < 1:
+            raise ValidationError("series_number must be greater than zero")
 
+        video.series_number = series_number
+        cleaned_prompt = (thumbnail_prompt or "").strip()
+        if cleaned_prompt.lower() in {"undefined", "null", "none"}:
+            cleaned_prompt = ""
+        video.thumbnail_prompt = cleaned_prompt or None
 
-def generate_metadata_draft(db: Session, settings: Settings, video_id: str) -> MetadataDraft:
-    video = db.get(VideoAsset, video_id)
-    if not video:
-        raise ValueError("Video not found")
+        self.db.commit()
+        self.db.refresh(video)
+        return video
 
-    folder = db.get(SeriesFolder, video.folder_id)
-    if not folder:
-        raise ValueError("Folder not found")
+    def approve(self, video_id: str) -> VideoAsset:
+        video = self._get_video(video_id)
+        video.status = VideoStatus.APPROVED.value
+        self.db.commit()
+        self.db.refresh(video)
+        return video
 
-    defaults = db.get(ChannelDefaults, 1)
-    if not defaults:
-        defaults = ChannelDefaults(id=1)
-        db.add(defaults)
-        db.flush()
+    def reject(self, video_id: str) -> VideoAsset:
+        video = self._get_video(video_id)
+        video.status = VideoStatus.INGESTED.value
+        self.db.commit()
+        self.db.refresh(video)
+        return video
 
-    # Auto-correlate Steam achievements by video time window when possible.
-    if folder.steam_app_id and video.recorded_at and video.duration_sec:
+    def upload(self, video_id: str) -> VideoAsset:
+        settings = self._require_settings()
+        video = self._get_video(video_id)
+        if video.status != VideoStatus.APPROVED.value:
+            raise ConflictError("Video must be approved before upload")
+
+        latest_draft = get_latest_draft(video)
+        if latest_draft is None:
+            latest_draft = self.generate_draft(video_id)
+            video = self._get_video(video_id)
+
+        defaults = get_or_create_channel_defaults(self.db, settings)
+        visibility = defaults.default_visibility if defaults else "private"
+
+        if settings.dry_run:
+            video.status = VideoStatus.UPLOADED.value
+            video.uploaded_url = f"https://youtube.com/watch?v=mock-{video.id[:8]}"
+        else:
+            video.uploaded_url = upload_video_to_youtube(
+                settings,
+                title=latest_draft.title_ptbr,
+                description=latest_draft.description_ptbr,
+                tags=list(latest_draft.tags or []),
+                visibility=visibility,
+                video_path=video.source_path,
+            )
+            video.status = VideoStatus.UPLOADED.value
+
+        self.db.commit()
+        self.db.refresh(video)
+        return video
+
+    def _require_settings(self) -> Settings:
+        if self.settings is None:
+            raise RuntimeError("Settings are required for this operation")
+        return self.settings
+
+    def _get_video(self, video_id: str) -> VideoAsset:
+        video = self.db.get(VideoAsset, video_id)
+        if video is None:
+            raise NotFoundError("Video not found")
+        return video
+
+    def _get_folder(self, folder_id: str) -> SeriesFolder:
+        folder = self.db.get(SeriesFolder, folder_id)
+        if folder is None:
+            raise NotFoundError("Folder not found")
+        return folder
+
+    def _next_draft_version(self, video: VideoAsset) -> int:
+        latest = get_latest_draft(video)
+        return 1 if latest is None else latest.version + 1
+
+    def _resolve_episode_number(self, video: VideoAsset) -> int:
+        if video.series_number and video.series_number > 0:
+            return video.series_number
+        return self._extract_episode_number(video)
+
+    def _extract_episode_number(self, video: VideoAsset) -> int:
+        videos = self.db.execute(
+            select(VideoAsset)
+            .where(VideoAsset.folder_id == video.folder_id)
+            .order_by(VideoAsset.recorded_at.is_(None), VideoAsset.recorded_at.asc(), VideoAsset.created_at.asc())
+        ).scalars()
+
+        for index, item in enumerate(videos, start=1):
+            if item.id == video.id:
+                return index
+        return 1
+
+    def _sync_steam_achievements(self, folder: SeriesFolder, video: VideoAsset) -> None:
+        if not folder.steam_app_id or not video.recorded_at or not video.duration_sec:
+            return
+
+        settings = self._require_settings()
         start_utc = video.recorded_at
         end_utc = video.recorded_at + timedelta(seconds=max(1, int(video.duration_sec)))
         matched = get_achievements_for_window(settings, int(folder.steam_app_id), start_utc, end_utc)
 
         payload = dict(video.session_payload or {})
-        if matched:
-            payload["achievements_unlocked"] = [item.get("name") for item in matched if item.get("name")]
-            payload["achievements_unlocked_detailed"] = matched
-        else:
-            payload["achievements_unlocked"] = []
-            payload["achievements_unlocked_detailed"] = []
+        payload["achievements_unlocked"] = [item.get("name") for item in matched if item.get("name")]
+        payload["achievements_unlocked_detailed"] = matched
         video.session_payload = payload
 
-    episode_number = _resolve_episode_number(db, video)
-    duration_minutes = (video.duration_sec // 60) if video.duration_sec else None
-    folder_name = (folder.name or "").lower()
-    if "resident evil" in folder_name or "requiem" in folder_name:
-        if duration_minutes is not None:
-            title = f"Resident Evil Requiem #{episode_number:02d} | {duration_minutes} MIN de Gameplay (PT-BR, Sem Comentários)"
-        else:
-            title = f"Resident Evil Requiem #{episode_number:02d} | Gameplay PT-BR (Sem Comentários)"
-    else:
-        title = f"{folder.name} Gameplay PT-BR | Episodio {episode_number:02d}"
-    description = _build_description(folder, video, defaults, episode_number)
-    tags = _build_tags(folder, defaults)
+    def _build_title(self, folder: SeriesFolder, video: VideoAsset, episode_number: int) -> str:
+        return f"{folder.name} Gameplay PT-BR | Episodio {episode_number:02d}"
 
-    for draft in video.drafts:
-        draft.is_active = False
+    def _build_tags(self, folder: SeriesFolder, defaults: ChannelDefaults) -> list[str]:
+        tags = [folder.name.lower(), "gameplay", "sem comentarios", "pt-br", *defaults.default_tags]
 
-    thumbnail_path = _generate_thumbnail(
-        Path(video.source_path),
-        Path(settings.artifacts_root) / "thumbnails" / f"{video.id}.jpg",
-        episode_number,
-        video.thumbnail_prompt,
-    )
+        per_game = get_game_tag_defaults()
+        folder_key = folder.name.strip().lower()
+        for game_name, game_tags in per_game.items():
+            game_key = game_name.strip().lower()
+            if game_key and (game_key == folder_key or game_key in folder_key or folder_key in game_key):
+                tags.extend(game_tags)
 
-    draft = MetadataDraft(
-        video_id=video.id,
-        title_ptbr=title,
-        description_ptbr=description,
-        tags=tags,
-        thumbnail_path=thumbnail_path,
-        model_provider=settings.default_model_provider,
-        language=defaults.language,
-        version=_next_draft_version(video),
-        is_active=True,
-    )
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for tag in tags:
+            clean = " ".join(tag.split()).strip()
+            if not clean:
+                continue
+            lowered = clean.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(clean)
+        return normalized[:15]
 
-    video.status = VideoStatus.DRAFT_READY.value
-    db.add(draft)
-    db.commit()
-    db.refresh(draft)
-    return draft
+    def _build_description(
+        self,
+        folder: SeriesFolder,
+        video: VideoAsset,
+        defaults: ChannelDefaults,
+        episode_number: int,
+    ) -> str:
+        payload = video.session_payload or {}
+        achievements = payload.get("achievements_unlocked") or []
+        playtime = payload.get("playtime_minutes")
+        duration_minutes = (video.duration_sec // 60) if video.duration_sec else None
+        duration = f"{duration_minutes} minutos" if duration_minutes is not None else "duracao indisponivel"
+
+        folder_name = (folder.name or "").lower()
+        if "resident evil" in folder_name or "requiem" in folder_name:
+            lines = [
+                (
+                    f"No episódio {episode_number:02d} de Resident Evil Requiem (Resident Evil 9), "
+                    "acompanhe gameplay sem comentários em PT-BR com foco na progressão da campanha, "
+                    "exploração, combate e clima de survival horror."
+                ),
+                "",
+                "Conteúdo deste vídeo:",
+                "- Gameplay sem comentários (no commentary)",
+                "- Trechos com Claire e Leon",
+                "- Exploração + combate + progressão de história",
+                "- Conquistas desbloqueadas durante a gameplay",
+                "",
+                f"Jogo: {folder.name}",
+                f"Idioma: {defaults.language}",
+                f"Plataforma: PC ({defaults.pc_config})",
+                f"Duração: ~{duration_minutes} min" if duration_minutes is not None else "Duração: indisponível",
+            ]
+            if playtime is not None:
+                lines.append(f"Playtime Steam no período: {playtime} minutos")
+            lines.append(self._achievements_line(achievements))
+            if video.thumbnail_prompt:
+                lines.append(f"Prompt thumbnail: {video.thumbnail_prompt}")
+            lines.extend(
+                [
+                    "",
+                    defaults.default_description_block,
+                    "",
+                    "Se curtir, deixa o like e se inscreve para acompanhar a série completa.",
+                    "Canal: https://www.youtube.com/@aggresiveHamster",
+                    "",
+                    "#ResidentEvilRequiem #ResidentEvil9 #GameplayPTBR #SemComentarios #SurvivalHorror",
+                ]
+            )
+            return "\n".join(lines)
+
+        lines = [
+            f"Serie: {folder.name}",
+            f"Episodio: {episode_number:02d}",
+            f"Idioma: {defaults.language}",
+            f"Formato: gameplay sem comentarios",
+            f"Duracao aproximada: {duration}",
+        ]
+        if playtime is not None:
+            lines.append(f"Playtime Steam no periodo: {playtime} minutos")
+        lines.append(self._achievements_line(achievements))
+        if video.thumbnail_prompt:
+            lines.append(f"Prompt thumbnail: {video.thumbnail_prompt}")
+        lines.append(f"PC: {defaults.pc_config}")
+        lines.append("")
+        lines.append(defaults.default_description_block)
+        return "\n".join(lines)
+
+    def _achievements_line(self, achievements: list) -> str:
+        if achievements:
+            return "Conquistas desbloqueadas: " + ", ".join(str(item) for item in achievements)
+        return "Conquistas desbloqueadas: sem novas conquistas registradas"
+
+    def _generate_thumbnail(self, video: VideoAsset, episode_number: int) -> str | None:
+        return EpisodeThumbnailRenderer.render(
+            video_path=Path(video.source_path),
+            output_path=Path(self._require_settings().artifacts_root) / "thumbnails" / f"{video.id}.jpg",
+            episode_number=episode_number,
+            thumbnail_prompt=video.thumbnail_prompt,
+        )
+
+
+def generate_metadata_draft(db: Session, settings: Settings, video_id: str) -> MetadataDraft:
+    return MetadataWorkflowService(db, settings).generate_draft(video_id)
 
 
 def update_video_settings(
@@ -307,73 +304,16 @@ def update_video_settings(
     series_number: int | None,
     thumbnail_prompt: str | None,
 ) -> VideoAsset:
-    video = db.get(VideoAsset, video_id)
-    if not video:
-        raise ValueError("Video not found")
-
-    if series_number is not None and series_number < 1:
-        raise ValueError("series_number must be greater than zero")
-
-    video.series_number = series_number
-    cleaned_prompt = (thumbnail_prompt or "").strip()
-    if cleaned_prompt.lower() in {"undefined", "null", "none"}:
-        cleaned_prompt = ""
-    video.thumbnail_prompt = cleaned_prompt or None
-    db.commit()
-    db.refresh(video)
-    return video
+    return MetadataWorkflowService(db).update_video_settings(video_id, series_number, thumbnail_prompt)
 
 
 def approve_video(db: Session, video_id: str) -> VideoAsset:
-    video = db.get(VideoAsset, video_id)
-    if not video:
-        raise ValueError("Video not found")
-
-    video.status = VideoStatus.APPROVED.value
-    db.commit()
-    db.refresh(video)
-    return video
+    return MetadataWorkflowService(db).approve(video_id)
 
 
 def reject_video(db: Session, video_id: str) -> VideoAsset:
-    video = db.get(VideoAsset, video_id)
-    if not video:
-        raise ValueError("Video not found")
-
-    video.status = VideoStatus.INGESTED.value
-    db.commit()
-    db.refresh(video)
-    return video
+    return MetadataWorkflowService(db).reject(video_id)
 
 
 def upload_video(db: Session, settings: Settings, video_id: str) -> VideoAsset:
-    video = db.get(VideoAsset, video_id)
-    if not video:
-        raise ValueError("Video not found")
-
-    latest_draft = get_latest_draft(video)
-    if not latest_draft:
-        # Auto-generate draft so upload can be one-click.
-        latest_draft = generate_metadata_draft(db, settings, video_id)
-
-    defaults = db.get(ChannelDefaults, 1)
-    visibility = defaults.default_visibility if defaults else "private"
-
-    if settings.dry_run:
-        video.status = VideoStatus.UPLOADED.value
-        video.uploaded_url = f"https://youtube.com/watch?v=mock-{video.id[:8]}"
-    else:
-        youtube_url = upload_video_to_youtube(
-            settings,
-            title=latest_draft.title_ptbr,
-            description=latest_draft.description_ptbr,
-            tags=list(latest_draft.tags or []),
-            visibility=visibility,
-            video_path=video.source_path,
-        )
-        video.status = VideoStatus.UPLOADED.value
-        video.uploaded_url = youtube_url
-
-    db.commit()
-    db.refresh(video)
-    return video
+    return MetadataWorkflowService(db, settings).upload(video_id)

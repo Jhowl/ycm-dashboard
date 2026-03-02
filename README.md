@@ -141,10 +141,12 @@ docker compose exec -T api pytest -q
 
 ### Achievement cuts (Full HD)
 
-Cuts are stored at:
+Cuts are stored in `YCM_CUTS_ROOT`.
+
+Default:
 
 ```text
-/mnt/animes/ycm-inbox/Resident Evil 9/archimevments
+/srv/ycm/artifacts/cuts
 ```
 
 Current flow can generate clips around achievement unlock points (e.g., start before unlock and end shortly after).

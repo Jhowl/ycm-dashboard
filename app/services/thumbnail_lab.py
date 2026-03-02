@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-import subprocess
 import random
+import subprocess
 import time
+from pathlib import Path
 
 from app.models import VideoAsset
 
@@ -95,7 +95,7 @@ def ensure_thumbnail_lab_assets(video: VideoAsset, force_regen: bool = False) ->
         try:
             subprocess.run([
                 "ffmpeg", "-y", *gpu_args, "-ss", str(w_start), "-to", str(w_end), "-i", str(source),
-                "-vf", "select=gt(scene\,0.27)", "-frames:v", "1", "-q:v", "2", str(output)
+                "-vf", r"select=gt(scene\,0.27)", "-frames:v", "1", "-q:v", "2", str(output)
             ], check=True, capture_output=True, timeout=45)
         except Exception:
             try:

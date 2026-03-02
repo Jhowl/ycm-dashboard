@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     video_root: str = "/srv/ycm/inbox"
     artifacts_root: str = "/srv/ycm/artifacts"
+    cuts_root: str = "/srv/ycm/artifacts/cuts"
     scheduler_scan_interval_seconds: int = 300
 
     default_language: str = "pt-BR"
@@ -104,6 +105,12 @@ def get_settings() -> Settings:
         or os.getenv("YOUTUBE_TOKEN_FILE")
         or "./data/youtube_token.json"
     )
+    settings.cuts_root = (
+        settings.cuts_root
+        or os.getenv("YCM_CUTS_ROOT")
+        or os.getenv("CUTS_ROOT")
+        or "/srv/ycm/artifacts/cuts"
+    )
 
     settings.steam_api_key = (
         settings.steam_api_key
@@ -129,4 +136,5 @@ def get_settings() -> Settings:
 
     Path(settings.video_root).mkdir(parents=True, exist_ok=True)
     Path(settings.artifacts_root).mkdir(parents=True, exist_ok=True)
+    Path(settings.cuts_root).mkdir(parents=True, exist_ok=True)
     return settings

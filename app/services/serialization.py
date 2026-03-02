@@ -1,22 +1,12 @@
 from __future__ import annotations
 
-from app.models import MetadataDraft, VideoAsset
+from app.models import VideoAsset
+from app.services.metadata import get_latest_active_draft
 from app.schemas import DraftOut, VideoOut
 
 
-def latest_active_draft(video: VideoAsset) -> MetadataDraft | None:
-    active = [draft for draft in video.drafts if draft.is_active]
-    if active:
-        return sorted(active, key=lambda d: (d.version, d.created_at), reverse=True)[0]
-
-    if not video.drafts:
-        return None
-
-    return sorted(video.drafts, key=lambda d: (d.version, d.created_at), reverse=True)[0]
-
-
 def video_to_schema(video: VideoAsset) -> VideoOut:
-    latest = latest_active_draft(video)
+    latest = get_latest_active_draft(video)
     return VideoOut(
         id=video.id,
         folder_id=video.folder_id,

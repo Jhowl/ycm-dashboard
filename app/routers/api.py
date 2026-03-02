@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.dependencies import require_api_token
 from app.db import get_db
-from app.models import ChannelDefaults, SeriesFolder, VideoAsset
+from app.models import SeriesFolder, VideoAsset
 from app.schemas import (
     ChannelDefaultsOut,
     ChannelDefaultsPatch,
@@ -26,7 +24,9 @@ from app.schemas import (
     VideoOut,
     VideoSettingsPatch,
 )
-from app.services.folders import ensure_channel_defaults, sync_folders_and_videos, update_folder_steam_link
+from app.services.channel import apply_channel_defaults_patch, get_or_create_channel_defaults
+from app.services.dashboard import build_home_stats
+from app.services.folders import sync_folders_and_videos, update_folder_steam_link
 from app.services.metadata import (
     approve_video,
     generate_metadata_draft,
@@ -44,7 +44,7 @@ router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_token)])
 @router.post("/folders/scan", response_model=ScanResultOut)
 def scan_folders(payload: ScanRequest, request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
-    ensure_channel_defaults(db, settings)
+    get_or_create_channel_defaults(db, settings)
     steam_games = get_steam_recent_games(settings, count=40)
     stats = sync_folders_and_videos(db, settings, payload.root_path, steam_games=steam_games)
     return ScanResultOut(**stats)
@@ -104,7 +104,7 @@ def patch_folder_steam_link(folder_id: str, payload: FolderSteamLinkPatch, db: S
 @router.get("/channel/defaults", response_model=ChannelDefaultsOut)
 def get_channel_defaults(request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
-    defaults = ensure_channel_defaults(db, settings)
+    defaults = get_or_create_channel_defaults(db, settings)
     return ChannelDefaultsOut.model_validate(defaults)
 
 
@@ -115,12 +115,8 @@ def patch_channel_defaults(
     db: Session = Depends(get_db),
 ):
     settings = request.app.state.settings
-    defaults = ensure_channel_defaults(db, settings)
-
-    updates = payload.model_dump(exclude_none=True)
-    for key, value in updates.items():
-        setattr(defaults, key, value)
-    defaults.updated_at = datetime.now(timezone.utc)
+    defaults = get_or_create_channel_defaults(db, settings)
+    apply_channel_defaults_patch(defaults, payload.model_dump(exclude_none=True))
 
     db.commit()
     db.refresh(defaults)
@@ -242,20 +238,4 @@ def telegram_webhook(payload: TelegramWebhookIn, request: Request, db: Session =
 
 @router.get("/home/stats", response_model=HomeStatsOut)
 def home_stats(db: Session = Depends(get_db)):
-    folders_total = db.execute(select(func.count(SeriesFolder.id))).scalar_one()
-    folders_active = db.execute(
-        select(func.count(SeriesFolder.id)).where(SeriesFolder.active.is_(True))
-    ).scalar_one()
-    pending_drafts = db.execute(
-        select(func.count(VideoAsset.id)).where(VideoAsset.status.in_(["INGESTED", "DRAFT_READY"]))
-    ).scalar_one()
-    ready_to_upload = db.execute(
-        select(func.count(VideoAsset.id)).where(VideoAsset.status == "APPROVED")
-    ).scalar_one()
-
-    return HomeStatsOut(
-        folders_total=folders_total,
-        folders_active=folders_active,
-        pending_drafts=pending_drafts,
-        ready_to_upload=ready_to_upload,
-    )
+    return HomeStatsOut(**build_home_stats(db))

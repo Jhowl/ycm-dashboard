@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class ChapterOut(BaseModel):
+    start_seconds: int
+    title: str
 
 
 class DraftOut(BaseModel):
@@ -14,7 +20,10 @@ class DraftOut(BaseModel):
     description_ptbr: str
     tags: list[str]
     thumbnail_path: str | None
+    thumbnail_prompt: str | None = None
+    chapters: list[ChapterOut] = Field(default_factory=list)
     model_provider: str
+    model_name: str | None = None
     language: str
     version: int
     is_active: bool
@@ -36,6 +45,11 @@ class VideoOut(BaseModel):
     language: str
     uploaded_url: str | None
     created_at: datetime
+    transcript_status: str = "PENDING"
+    transcript_language: str | None = None
+    transcript_path: str | None = None
+    transcript_error: str | None = None
+    chapters: list[ChapterOut] = Field(default_factory=list)
     latest_draft: DraftOut | None = None
 
 
@@ -86,6 +100,7 @@ class ScanResultOut(BaseModel):
     reactivated_folders: int
     deactivated_folders: int
     new_videos: int
+    auto_linked_folders: int = 0
     scanned_at: datetime
 
 
@@ -134,3 +149,47 @@ class HomeStatsOut(BaseModel):
 
 class ScanRequest(BaseModel):
     root_path: str | None = None
+
+
+class TranscribeOut(BaseModel):
+    ok: bool
+    video_id: str
+    task_id: str | None = None
+    status: str
+
+
+class TranscriptSegmentOut(BaseModel):
+    start: float
+    end: float
+    text: str
+
+
+class TranscriptOut(BaseModel):
+    video_id: str
+    status: str
+    language: str | None = None
+    text: str | None = None
+    segments: list[TranscriptSegmentOut] = Field(default_factory=list)
+    error: str | None = None
+
+
+class SteamNewsItemOut(BaseModel):
+    gid: str | None = None
+    title: str
+    url: str | None = None
+    author: str | None = None
+    feedlabel: str | None = None
+    contents_snippet: str | None = None
+    date_label: str | None = None
+
+
+class OllamaHealthOut(BaseModel):
+    ok: bool
+    configured_model: str | None = None
+    models: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+
+class GenericOut(BaseModel):
+    ok: bool
+    data: dict[str, Any] | None = None

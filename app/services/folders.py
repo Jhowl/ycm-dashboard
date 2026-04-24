@@ -1,3 +1,4 @@
+"""Filesystem → DB sync for series folders and video assets."""
 from __future__ import annotations
 
 import json
@@ -11,10 +12,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.logging_setup import get_logger
 from app.models import SeriesFolder, VideoAsset
 from app.services.channel import get_or_create_channel_defaults
 from app.services.errors import NotFoundError
 from app.services.media import VideoProbe
+from app.services.steam import auto_match_folder_by_playtime
+
+logger = get_logger(__name__)
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm"}
 
@@ -26,6 +31,7 @@ class FolderSyncStats:
     reactivated_folders: int = 0
     deactivated_folders: int = 0
     new_videos: int = 0
+    auto_linked_folders: int = 0
     scanned_at: datetime | None = None
 
     def to_dict(self) -> dict:
@@ -33,11 +39,19 @@ class FolderSyncStats:
 
 
 class FolderSyncService:
-    def __init__(self, db: Session, settings: Settings, root_path: str | None = None, steam_games: list[dict] | None = None):
+    def __init__(
+        self,
+        db: Session,
+        settings: Settings,
+        root_path: str | None = None,
+        steam_games: list[dict] | None = None,
+        owned_games: list[dict] | None = None,
+    ):
         self.db = db
         self.settings = settings
         self.root = Path(root_path or settings.video_root)
-        self.steam_games = steam_games or []
+        self.steam_recent = steam_games or []
+        self.steam_owned = owned_games or []
         self.now = datetime.now(timezone.utc)
         self.stats = FolderSyncStats(scanned_at=self.now)
 
@@ -48,7 +62,10 @@ class FolderSyncService:
         self.reserved_slugs: set[str] = set()
 
     def sync(self) -> FolderSyncStats:
-        discovered_dirs = sorted((path for path in self.root.iterdir() if path.is_dir()), key=lambda path: path.name.lower())
+        discovered_dirs = sorted(
+            (path for path in self.root.iterdir() if path.is_dir()),
+            key=lambda path: path.name.lower(),
+        )
         discovered_paths: set[str] = set()
         self.stats.discovered_folders = len(discovered_dirs)
 
@@ -59,6 +76,15 @@ class FolderSyncService:
 
         self._deactivate_missing_folders(discovered_paths)
         self.db.commit()
+        logger.info(
+            "folder_sync_done",
+            extra={
+                "discovered": self.stats.discovered_folders,
+                "new": self.stats.new_folders,
+                "new_videos": self.stats.new_videos,
+                "auto_linked": self.stats.auto_linked_folders,
+            },
+        )
         return self.stats
 
     def _sync_folder(self, directory: Path) -> SeriesFolder:
@@ -94,7 +120,10 @@ class FolderSyncService:
         return folder
 
     def _sync_videos_for_folder(self, folder: SeriesFolder, directory: Path) -> None:
-        for file_path in sorted((path for path in directory.iterdir() if path.is_file()), key=lambda path: path.name.lower()):
+        for file_path in sorted(
+            (path for path in directory.iterdir() if path.is_file()),
+            key=lambda path: path.name.lower(),
+        ):
             if file_path.suffix.lower() not in VIDEO_EXTENSIONS:
                 continue
             self._ingest_video_file(folder, file_path)
@@ -119,21 +148,35 @@ class FolderSyncService:
         series_number = _normalize_series_number(session_payload.get("series_number"))
         thumbnail_prompt = _normalize_thumbnail_prompt(session_payload.get("thumbnail_prompt"))
 
-        self.db.add(
-            VideoAsset(
-                folder_id=folder.id,
-                filename=file_path.name,
-                source_path=full_path,
-                recorded_at=recorded_at,
-                duration_sec=probe_duration_seconds(file_path),
-                series_number=series_number,
-                thumbnail_prompt=thumbnail_prompt,
-                status="INGESTED",
-                language=self.settings.default_language,
-                session_payload=session_payload,
-            )
+        video = VideoAsset(
+            folder_id=folder.id,
+            filename=file_path.name,
+            source_path=full_path,
+            recorded_at=recorded_at,
+            duration_sec=probe_duration_seconds(file_path),
+            series_number=series_number,
+            thumbnail_prompt=thumbnail_prompt,
+            status="INGESTED",
+            language=self.settings.default_language,
+            session_payload=session_payload,
         )
+        self.db.add(video)
+        self.db.flush()
         self.stats.new_videos += 1
+
+        self._maybe_schedule_transcription(video)
+
+    def _maybe_schedule_transcription(self, video: VideoAsset) -> None:
+        if not self.settings.whisper_enabled or not self.settings.whisper_auto_run:
+            return
+        try:
+            # Lazy import to avoid circular dependency + keep tests quick.
+            from worker.tasks import transcribe_video_task
+
+            transcribe_video_task.delay(video.id)
+            logger.info("transcribe_scheduled", extra={"video_id": video.id})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("transcribe_schedule_failed", extra={"err": str(exc)[:200]})
 
     def _deactivate_missing_folders(self, discovered_paths: set[str]) -> None:
         for folder in self.existing_folders:
@@ -164,7 +207,11 @@ class FolderSyncService:
         if folder.steam_app_id and folder.steam_game_name:
             return
 
-        match = _find_steam_match(folder_name, self.steam_games)
+        match = auto_match_folder_by_playtime(
+            folder_name,
+            recent_games=self.steam_recent,
+            owned_games=self.steam_owned,
+        )
         if not match:
             return
 
@@ -175,7 +222,12 @@ class FolderSyncService:
 
         if steam_app_id:
             folder.steam_app_id = steam_app_id
-        folder.steam_game_name = str(match.get("name") or folder_name)
+            folder.steam_game_name = str(match.get("name") or folder_name)
+            self.stats.auto_linked_folders += 1
+            logger.info(
+                "folder_auto_linked",
+                extra={"folder": folder_name, "app_id": steam_app_id, "game": match.get("name")},
+            )
 
 
 def ensure_channel_defaults(db: Session, settings: Settings):
@@ -200,20 +252,17 @@ def parse_recorded_at_from_filename(filename: str) -> datetime | None:
 
 
 def load_session_payload(video_path: Path) -> dict:
-    sidecar_candidates = [
+    for candidate in (
         video_path.with_suffix(video_path.suffix + ".session.json"),
         video_path.with_suffix(video_path.suffix + ".ps.json"),
         video_path.with_suffix(".session.json"),
-    ]
-
-    for candidate in sidecar_candidates:
+    ):
         if not candidate.exists() or not candidate.is_file():
             continue
         try:
             return json.loads(candidate.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
-
     return {}
 
 
@@ -226,8 +275,11 @@ def sync_folders_and_videos(
     settings: Settings,
     root_path: str | None = None,
     steam_games: list[dict] | None = None,
+    owned_games: list[dict] | None = None,
 ) -> dict:
-    service = FolderSyncService(db, settings, root_path=root_path, steam_games=steam_games)
+    service = FolderSyncService(
+        db, settings, root_path=root_path, steam_games=steam_games, owned_games=owned_games
+    )
     return service.sync().to_dict()
 
 
@@ -250,14 +302,13 @@ def update_folder_steam_link(
 
 
 def _resolve_recorded_at(file_path: Path, session_payload: dict) -> datetime | None:
-    recorded_at = None
     payload_value = session_payload.get("recorded_at")
     if payload_value:
         try:
-            recorded_at = datetime.fromisoformat(str(payload_value))
+            return datetime.fromisoformat(str(payload_value))
         except ValueError:
-            recorded_at = None
-    return recorded_at or parse_recorded_at_from_filename(file_path.name)
+            pass
+    return parse_recorded_at_from_filename(file_path.name)
 
 
 def _normalize_series_number(value: object) -> int | None:
@@ -269,35 +320,5 @@ def _normalize_series_number(value: object) -> int | None:
 def _normalize_thumbnail_prompt(value: object) -> str | None:
     if not isinstance(value, str):
         return None
-
     cleaned = value.strip()
     return cleaned or None
-
-
-def _normalize_for_match(value: str) -> str:
-    return slugify(value or "", lowercase=True).replace("-", "")
-
-
-def _find_steam_match(folder_name: str, steam_games: list[dict] | None) -> dict | None:
-    if not steam_games:
-        return None
-
-    folder_norm = _normalize_for_match(folder_name)
-    if not folder_norm:
-        return None
-
-    for game in steam_games:
-        game_name = str(game.get("name") or "")
-        game_norm = _normalize_for_match(game_name)
-        if game_norm and folder_norm == game_norm:
-            return game
-
-    for game in steam_games:
-        game_name = str(game.get("name") or "")
-        game_norm = _normalize_for_match(game_name)
-        if not game_norm:
-            continue
-        if folder_norm in game_norm or game_norm in folder_norm:
-            return game
-
-    return None

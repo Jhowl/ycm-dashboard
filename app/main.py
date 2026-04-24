@@ -8,14 +8,32 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings, get_settings
 from app.db import create_engine_and_session_factory, init_db
+from app.logging_setup import configure_logging, get_logger
 from app.routers.api import router as api_router
 from app.routers.ui import router as ui_router
 
 
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
+    settings: Settings = app.state.settings
+    configure_logging(level=settings.log_level, use_json=settings.log_json)
+    logger = get_logger(__name__)
+
     init_db(app.state.engine)
-    yield
+    logger.info(
+        "app_started",
+        extra={
+            "environment": settings.environment,
+            "ollama_enabled": settings.ollama_enabled,
+            "ollama_model": settings.ollama_model,
+            "whisper_enabled": settings.whisper_enabled,
+            "dry_run": settings.dry_run,
+        },
+    )
+    try:
+        yield
+    finally:
+        logger.info("app_shutdown")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

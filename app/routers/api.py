@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.dependencies import require_api_token
 from app.db import get_db
-from app.models import SeriesFolder, VideoAsset
+from app.models import SeriesFolder, TranscriptStatus, VideoAsset
 from app.schemas import (
     ChannelDefaultsOut,
     ChannelDefaultsPatch,
@@ -16,10 +16,15 @@ from app.schemas import (
     FolderUrlOut,
     HomeStatsOut,
     JobActionOut,
+    OllamaHealthOut,
     ScanRequest,
     ScanResultOut,
     SeriesDetailOut,
+    SteamNewsItemOut,
     TelegramWebhookIn,
+    TranscribeOut,
+    TranscriptOut,
+    TranscriptSegmentOut,
     VideoGenerateOut,
     VideoOut,
     VideoSettingsPatch,
@@ -34,9 +39,12 @@ from app.services.metadata import (
     update_video_settings,
     upload_video,
 )
+from app.services.ollama import OllamaClient
 from app.services.serialization import video_to_schema
-from app.services.steam import get_steam_recent_games
+from app.services.steam import get_steam_owned_games, get_steam_recent_games
+from app.services.steam_news import fetch_steam_news
 from app.services.telegram import handle_telegram_command
+from app.services.transcription import load_transcript
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_token)])
 
@@ -46,7 +54,14 @@ def scan_folders(payload: ScanRequest, request: Request, db: Session = Depends(g
     settings = request.app.state.settings
     get_or_create_channel_defaults(db, settings)
     steam_games = get_steam_recent_games(settings, count=40)
-    stats = sync_folders_and_videos(db, settings, payload.root_path, steam_games=steam_games)
+    owned_games = get_steam_owned_games(settings)
+    stats = sync_folders_and_videos(
+        db,
+        settings,
+        payload.root_path,
+        steam_games=steam_games,
+        owned_games=owned_games,
+    )
     return ScanResultOut(**stats)
 
 
@@ -84,6 +99,15 @@ def get_folder_url(folder_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
 
     return FolderUrlOut(folder_id=folder.id, slug=folder.slug, series_url=folder.series_url)
+
+
+@router.get("/folders/{folder_id}/steam-news", response_model=list[SteamNewsItemOut])
+def get_folder_steam_news(folder_id: str, count: int = 5, db: Session = Depends(get_db)):
+    folder = db.get(SeriesFolder, folder_id)
+    if not folder:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
+    items = fetch_steam_news(folder.steam_app_id, count=count)
+    return [SteamNewsItemOut(**item) for item in items]
 
 
 @router.patch("/folders/{folder_id}/steam-link", response_model=FolderOut)
@@ -163,6 +187,78 @@ def generate_video_metadata(video_id: str, request: Request, db: Session = Depen
     return VideoGenerateOut(ok=True, video_id=video_id, draft_id=draft.id)
 
 
+@router.post("/videos/{video_id}/transcribe", response_model=TranscribeOut)
+def trigger_transcription(video_id: str, request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    video = db.get(VideoAsset, video_id)
+    if not video:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+    if not settings.whisper_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Whisper is disabled (set YCM_WHISPER_ENABLED=true)",
+        )
+
+    task_id: str | None = None
+    try:
+        from worker.tasks import transcribe_video_task
+
+        async_result = transcribe_video_task.delay(video_id)
+        task_id = async_result.id
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Celery unavailable: {exc}",
+        ) from exc
+
+    video.transcript_status = TranscriptStatus.PENDING.value
+    video.transcript_error = None
+    db.commit()
+
+    return TranscribeOut(
+        ok=True,
+        video_id=video_id,
+        task_id=task_id,
+        status=video.transcript_status,
+    )
+
+
+@router.get("/videos/{video_id}/transcript", response_model=TranscriptOut)
+def get_video_transcript(video_id: str, db: Session = Depends(get_db)):
+    video = db.get(VideoAsset, video_id)
+    if not video:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+
+    transcript = load_transcript(video)
+    segments: list[TranscriptSegmentOut] = []
+    text = video.transcript_text
+    language = video.transcript_language
+
+    if transcript:
+        text = transcript.get("text") or text
+        language = transcript.get("language") or language
+        for seg in transcript.get("segments") or []:
+            try:
+                segments.append(
+                    TranscriptSegmentOut(
+                        start=float(seg.get("start", 0) or 0),
+                        end=float(seg.get("end", 0) or 0),
+                        text=str(seg.get("text") or "").strip(),
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+
+    return TranscriptOut(
+        video_id=video_id,
+        status=video.transcript_status or "PENDING",
+        language=language,
+        text=text,
+        segments=segments,
+        error=video.transcript_error,
+    )
+
+
 @router.patch("/videos/{video_id}/settings", response_model=VideoOut)
 def patch_video_settings(video_id: str, payload: VideoSettingsPatch, db: Session = Depends(get_db)):
     try:
@@ -239,3 +335,15 @@ def telegram_webhook(payload: TelegramWebhookIn, request: Request, db: Session =
 @router.get("/home/stats", response_model=HomeStatsOut)
 def home_stats(db: Session = Depends(get_db)):
     return HomeStatsOut(**build_home_stats(db))
+
+
+@router.get("/ollama/health", response_model=OllamaHealthOut)
+def ollama_health(request: Request):
+    settings = request.app.state.settings
+    result = OllamaClient(settings).health()
+    return OllamaHealthOut(
+        ok=bool(result.get("ok")),
+        configured_model=result.get("configured_model") or settings.ollama_model,
+        models=list(result.get("models") or []),
+        reason=result.get("reason"),
+    )

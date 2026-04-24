@@ -6,6 +6,7 @@ from app.models import VideoAsset
 from app.services.folders import sync_folders_and_videos
 from app.services.metadata import generate_metadata_draft, upload_video
 from app.services.thumbnail_lab import ensure_thumbnail_lab_assets
+from app.services.transcription import transcribe_video
 from worker.celery_app import celery_app
 from worker.runtime import worker_session
 
@@ -40,6 +41,44 @@ def generate_thumbnail_options_task(video_id: str) -> dict:
 
     logger.info("Thumbnail options generated for video=%s", video_id)
     return {"video_id": video_id, "count": len(files)}
+
+
+@celery_app.task(
+    name="tasks.transcribe_video",
+    bind=True,
+    autoretry_for=(RuntimeError,),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    retry_jitter=True,
+    max_retries=3,
+)
+def transcribe_video_task(self, video_id: str) -> dict:
+    """Run Whisper on a video in the background. Optionally chains metadata
+    generation after a successful transcript if ``whisper_auto_run`` is on.
+    """
+    with worker_session() as (settings, db):
+        result = transcribe_video(db, settings, video_id)
+        auto_generate_draft = bool(settings.ollama_enabled and settings.whisper_auto_run)
+
+    logger.info(
+        "Transcription finished for video=%s language=%s segments=%d",
+        video_id,
+        result.language,
+        len(result.segments),
+    )
+
+    if auto_generate_draft:
+        try:
+            generate_metadata_task.delay(video_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to chain metadata task for video=%s err=%s", video_id, exc)
+
+    return {
+        "video_id": video_id,
+        "language": result.language,
+        "segments": len(result.segments),
+        "transcript_path": result.transcript_path,
+    }
 
 
 @celery_app.task(name="tasks.upload_video")

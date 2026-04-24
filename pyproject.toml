@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ycm-dashboard"
+version = "0.2.0"
+description = "Folder-first YouTube gameplay workflow with Ollama, Whisper and Steam integrations."
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = [".venv", "data", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # import ordering
+  "B",   # bugbear
+  "UP",  # pyupgrade
+  "SIM", # simplify
+  "C4",  # comprehensions
+  "RUF", # ruff
+]
+ignore = [
+  "E501",  # line length handled by formatter
+  "B008",  # FastAPI Depends default is idiomatic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+filterwarnings = [
+  "ignore::DeprecationWarning:httpx",
+  "ignore::DeprecationWarning:celery",
+]

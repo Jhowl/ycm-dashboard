@@ -18,6 +18,14 @@ class VideoStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class TranscriptStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    READY = "READY"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
@@ -65,6 +73,16 @@ class VideoAsset(TimestampMixin, Base):
     uploaded_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     session_payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
+    # Transcription / chapters (added in v0.2)
+    transcript_status: Mapped[str] = mapped_column(
+        String(16), default=TranscriptStatus.PENDING.value, nullable=False
+    )
+    transcript_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    transcript_language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    transcript_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcript_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chapters: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+
     folder: Mapped[SeriesFolder] = relationship("SeriesFolder", back_populates="videos")
     drafts: Mapped[list[MetadataDraft]] = relationship(
         "MetadataDraft", back_populates="video", cascade="all, delete-orphan"
@@ -80,7 +98,10 @@ class MetadataDraft(TimestampMixin, Base):
     description_ptbr: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    model_provider: Mapped[str] = mapped_column(String(64), default="opencloud", nullable=False)
+    thumbnail_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chapters: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    model_provider: Mapped[str] = mapped_column(String(64), default="ollama", nullable=False)
+    model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     language: Mapped[str] = mapped_column(String(16), default="pt-BR", nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

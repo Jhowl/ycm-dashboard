@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.models import SeriesFolder, VideoAsset
+from app.models import SeriesFolder, TranscriptStatus, VideoAsset
 from app.services.channel import get_or_create_channel_defaults, update_channel_defaults_from_form
 from app.services.dashboard import build_home_stats, get_youtube_token_status
 from app.services.folders import sync_folders_and_videos, update_folder_steam_link
@@ -23,10 +23,17 @@ from app.services.metadata import (
     update_video_settings,
     get_latest_draft,
 )
+from app.services.ollama import OllamaClient
 from app.services.serialization import video_to_schema
-from app.services.steam import get_steam_dashboard_data, get_steam_recent_games
+from app.services.steam import (
+    get_steam_dashboard_data,
+    get_steam_owned_games,
+    get_steam_recent_games,
+)
+from app.services.steam_news import fetch_steam_news
 from app.services.steam_screenshots import fetch_steam_screenshots
 from app.services.thumbnail_lab import thumbnail_lab_dir
+from app.services.transcription import load_transcript
 from app.services.youtube_oauth import (
     build_youtube_auth_url,
     exchange_code_for_tokens,
@@ -64,6 +71,9 @@ def home(request: Request, db: Session = Depends(get_db)):
             "youtube_token_exists": youtube_token_exists,
             "youtube_token_updated_at": youtube_token_updated_at,
             "steam_data": steam_data,
+            "ollama_model": settings.ollama_model,
+            "ollama_enabled": settings.ollama_enabled,
+            "whisper_enabled": settings.whisper_enabled,
         },
     )
 
@@ -73,6 +83,7 @@ def config_page(request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
     defaults = get_or_create_channel_defaults(db, settings)
     youtube_token_exists, youtube_token_updated_at = get_youtube_token_status(settings.youtube_token_file)
+    ollama_status = OllamaClient(settings).health()
 
     return templates.TemplateResponse(
         name="config.html",
@@ -85,6 +96,13 @@ def config_page(request: Request, db: Session = Depends(get_db)):
             "youtube_token_exists": youtube_token_exists,
             "youtube_token_updated_at": youtube_token_updated_at,
             "game_tag_defaults_json": game_tag_defaults_text(),
+            "ollama_base_url": settings.ollama_base_url,
+            "ollama_model": settings.ollama_model,
+            "ollama_status": ollama_status,
+            "whisper_enabled": settings.whisper_enabled,
+            "whisper_model": settings.whisper_model,
+            "whisper_device": settings.whisper_device,
+            "transcripts_root": settings.transcripts_root,
         },
     )
 
@@ -171,7 +189,10 @@ def folders_page(request: Request, include_inactive: bool = False, db: Session =
 def scan_folders_ui(request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
     steam_games = get_steam_recent_games(settings, count=40)
-    sync_folders_and_videos(db, settings, steam_games=steam_games)
+    owned_games = get_steam_owned_games(settings)
+    sync_folders_and_videos(
+        db, settings, steam_games=steam_games, owned_games=owned_games
+    )
     return RedirectResponse(url="/folders", status_code=303)
 
 
@@ -233,14 +254,45 @@ def series_page(slug: str, request: Request, db: Session = Depends(get_db)):
         card["upload_task_error"] = payload.get("upload_task_error")
         video_cards.append(card)
 
+    steam_news = fetch_steam_news(folder.steam_app_id, count=5) if folder.steam_app_id else []
+
     return templates.TemplateResponse(
         name="series.html",
         request=request,
         context={
             "folder": folder,
             "videos": video_cards,
+            "steam_news": steam_news,
             "notice": request.query_params.get("notice"),
         },
+    )
+
+
+@router.get("/ui/partials/series/{slug}/news")
+def series_news_partial(slug: str, request: Request, db: Session = Depends(get_db)):
+    folder = db.execute(
+        select(SeriesFolder).where(SeriesFolder.slug == slug)
+    ).scalar_one_or_none()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Series not found")
+
+    steam_news = fetch_steam_news(folder.steam_app_id, count=8) if folder.steam_app_id else []
+    return templates.TemplateResponse(
+        name="partials/steam_news.html",
+        request=request,
+        context={"folder": folder, "steam_news": steam_news},
+    )
+
+
+@router.get("/ui/partials/videos/{video_id}/transcript-status")
+def transcript_status_partial(video_id: str, request: Request, db: Session = Depends(get_db)):
+    video = db.get(VideoAsset, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    return templates.TemplateResponse(
+        name="partials/transcript_status.html",
+        request=request,
+        context={"video": video_to_schema(video)},
     )
 
 
@@ -308,6 +360,7 @@ def video_settings_page(video_id: str, request: Request, db: Session = Depends(g
             )
 
     latest = get_latest_draft(video)
+    transcript = load_transcript(video)
     return templates.TemplateResponse(
         name="thumbnail_lab.html",
         request=request,
@@ -318,6 +371,7 @@ def video_settings_page(video_id: str, request: Request, db: Session = Depends(g
             "steam_images": steam_images,
             "images_ready": bool(options),
             "episode_links": episode_links,
+            "transcript": transcript,
         },
     )
 
@@ -388,6 +442,29 @@ def generate_video_ui(video_id: str, request: Request, db: Session = Depends(get
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _redirect_back(request, notice="draft_gerado")
+
+
+@router.post("/ui/videos/{video_id}/transcribe")
+def trigger_transcription_ui(video_id: str, request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    video = db.get(VideoAsset, video_id)
+    if not video:
+        return _redirect_back(request, notice="erro:Video nao encontrado")
+    if not settings.whisper_enabled:
+        return _redirect_back(request, notice="erro:Whisper desativado")
+
+    try:
+        from worker.tasks import transcribe_video_task
+
+        task = transcribe_video_task.delay(video_id)
+        short_task = task.id[:8] if task.id else "sem-id"
+    except Exception as exc:  # noqa: BLE001
+        return _redirect_back(request, notice=f"erro:celery {str(exc)[:40]}")
+
+    video.transcript_status = TranscriptStatus.PENDING.value
+    video.transcript_error = None
+    db.commit()
+    return _redirect_back(request, notice=f"transcricao_fila:{short_task}")
 
 
 @router.post("/ui/videos/{video_id}/settings")

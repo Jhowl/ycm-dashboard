@@ -1,19 +1,37 @@
+"""Video metadata generation workflow.
+
+The pipeline orchestrates:
+  - Steam achievements lookup (for the recorded window)
+  - Transcript excerpt + chapters (when available, via Ollama)
+  - Ollama-driven PT-BR title / description / tags / thumbnail prompt
+  - Template-based fallback when Ollama is disabled or unreachable
+
+Fallback output is stable — existing tests validate exact strings like
+``"Gameplay PT-BR"`` and ``"Prompt thumbnail: ..."`` in the description.
+"""
 from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.logging_setup import get_logger
 from app.models import ChannelDefaults, MetadataDraft, SeriesFolder, VideoAsset, VideoStatus
 from app.services.channel import get_or_create_channel_defaults
 from app.services.errors import ConflictError, NotFoundError, ValidationError
 from app.services.game_defaults import get_game_tag_defaults
 from app.services.media import EpisodeThumbnailRenderer
+from app.services.ollama import OllamaClient, format_chapters_for_description
 from app.services.steam import get_achievements_for_window
+from app.services.transcription import load_transcript
 from app.services.youtube_publish import upload_video_to_youtube
+from app.time_utils import format_datetime_ny
+
+logger = get_logger(__name__)
 
 
 def get_latest_draft(video: VideoAsset) -> MetadataDraft | None:
@@ -34,6 +52,7 @@ class MetadataWorkflowService:
         self.db = db
         self.settings = settings
 
+    # ---- main entry points -------------------------------------------
     def generate_draft(self, video_id: str) -> MetadataDraft:
         settings = self._require_settings()
         video = self._get_video(video_id)
@@ -41,12 +60,55 @@ class MetadataWorkflowService:
         defaults = get_or_create_channel_defaults(self.db, settings)
 
         self._sync_steam_achievements(folder, video)
+        self.db.refresh(video)
 
         episode_number = self._resolve_episode_number(video)
-        title = self._build_title(folder, video, episode_number)
-        description = self._build_description(folder, video, defaults, episode_number)
-        tags = self._build_tags(folder, defaults)
+        transcript = load_transcript(video)
+        per_game_tags = self._per_game_tags(folder)
+        achievements = self._achievement_names(video)
 
+        ollama = OllamaClient(settings)
+        content = ollama.generate_video_content(
+            game_name=folder.name,
+            episode_number=episode_number,
+            duration_minutes=(video.duration_sec // 60) if video.duration_sec else None,
+            recorded_at_label=format_datetime_ny(video.recorded_at) if video.recorded_at else None,
+            channel_language=defaults.language,
+            pc_config=defaults.pc_config,
+            default_description_block=defaults.default_description_block,
+            default_tags=list(defaults.default_tags or []),
+            per_game_tags=per_game_tags,
+            achievements=achievements,
+            transcript_excerpt=(transcript or {}).get("text"),
+            thumbnail_hint=video.thumbnail_prompt,
+        )
+
+        chapters: list[dict[str, Any]] = content.chapters
+        if transcript and not chapters and ollama.is_enabled():
+            chapters = ollama.generate_chapters(
+                game_name=folder.name,
+                episode_number=episode_number,
+                duration_seconds=int(video.duration_sec or 0),
+                transcript_segments=transcript.get("segments") or [],
+            )
+
+        # Description composition:
+        # - Use Ollama body when available; otherwise template fallback.
+        # - Always append a deterministic suffix so existing tests (and UI) can
+        #   rely on the defaults block + thumbnail prompt being present.
+        description = self._compose_description(
+            base_description=content.description,
+            chapters=chapters,
+            defaults=defaults,
+            thumbnail_prompt=video.thumbnail_prompt,
+            used_fallback=content.used_fallback,
+            playtime=_playtime_minutes(video),
+        )
+
+        tags = self._finalize_tags(folder, defaults, content.tags, per_game_tags)
+        title = self._finalize_title(content.title, folder, episode_number, content.used_fallback)
+
+        # Deactivate previous drafts
         for draft in video.drafts:
             draft.is_active = False
 
@@ -55,17 +117,30 @@ class MetadataWorkflowService:
             title_ptbr=title,
             description_ptbr=description,
             tags=tags,
+            chapters=chapters,
             thumbnail_path=self._generate_thumbnail(video, episode_number),
-            model_provider=settings.default_model_provider,
+            thumbnail_prompt=content.thumbnail_prompt,
+            model_provider="ollama" if not content.used_fallback else "template",
+            model_name=content.model,
             language=defaults.language,
             version=self._next_draft_version(video),
             is_active=True,
         )
 
         video.status = VideoStatus.DRAFT_READY.value
+        video.chapters = chapters
         self.db.add(draft)
         self.db.commit()
         self.db.refresh(draft)
+        logger.info(
+            "draft_generated",
+            extra={
+                "video_id": video.id,
+                "used_fallback": content.used_fallback,
+                "chapters": len(chapters),
+                "tags": len(tags),
+            },
+        )
         return draft
 
     def update_video_settings(
@@ -134,6 +209,105 @@ class MetadataWorkflowService:
         self.db.refresh(video)
         return video
 
+    # ---- composition helpers -----------------------------------------
+    def _finalize_title(
+        self,
+        llm_title: str,
+        folder: SeriesFolder,
+        episode_number: int,
+        used_fallback: bool,
+    ) -> str:
+        """Keep the deterministic template when LLM is offline; otherwise honor
+        the LLM output but ensure the ``Episodio NN`` suffix stays present.
+        """
+        if used_fallback:
+            return f"{folder.name} Gameplay PT-BR | Episodio {episode_number:02d}"
+
+        title = (llm_title or "").strip() or f"{folder.name} Gameplay PT-BR"
+        episode_suffix = f"Episodio {episode_number:02d}"
+        if episode_suffix.lower() not in title.lower():
+            title = f"{title} | {episode_suffix}"
+        return title[:100]
+
+    def _compose_description(
+        self,
+        *,
+        base_description: str,
+        chapters: list[dict[str, Any]],
+        defaults: ChannelDefaults,
+        thumbnail_prompt: str | None,
+        used_fallback: bool,
+        playtime: int | None,
+    ) -> str:
+        base = (base_description or "").strip()
+        pieces: list[str] = [base] if base else []
+
+        chapters_block = format_chapters_for_description(chapters)
+        if chapters_block and chapters_block not in base:
+            pieces.append(chapters_block)
+
+        # Deterministic suffix — tests rely on these lines existing.
+        suffix_lines: list[str] = []
+        if playtime is not None:
+            suffix_lines.append(f"Playtime Steam no periodo: {playtime} minutos")
+        if thumbnail_prompt:
+            suffix_lines.append(f"Prompt thumbnail: {thumbnail_prompt}")
+
+        defaults_block = (defaults.default_description_block or "").strip()
+        if defaults_block and defaults_block not in base:
+            if suffix_lines:
+                suffix_lines.append("")
+            suffix_lines.append(defaults_block)
+
+        if suffix_lines:
+            pieces.append("\n".join(suffix_lines))
+
+        # Canal/hashtag footer (only for LLM output; fallback description already has its own style)
+        if not used_fallback:
+            pieces.append(
+                "Canal: https://www.youtube.com/@aggresiveHamster\n#GameplayPTBR #SemComentarios"
+            )
+
+        return "\n\n".join(piece for piece in pieces if piece).strip()
+
+    def _finalize_tags(
+        self,
+        folder: SeriesFolder,
+        defaults: ChannelDefaults,
+        llm_tags: list[str],
+        per_game_tags: list[str],
+    ) -> list[str]:
+        base = [folder.name.lower(), "gameplay", "sem comentarios", "pt-br"]
+        merged = base + list(llm_tags or []) + list(defaults.default_tags or []) + per_game_tags
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for tag in merged:
+            clean = " ".join(str(tag).split()).strip()
+            if not clean:
+                continue
+            key = clean.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(clean)
+        return normalized[:15]
+
+    def _per_game_tags(self, folder: SeriesFolder) -> list[str]:
+        per_game = get_game_tag_defaults()
+        folder_key = folder.name.strip().lower()
+        collected: list[str] = []
+        for game_name, game_tags in per_game.items():
+            game_key = game_name.strip().lower()
+            if game_key and (game_key == folder_key or game_key in folder_key or folder_key in game_key):
+                collected.extend(game_tags)
+        return collected
+
+    def _achievement_names(self, video: VideoAsset) -> list[str]:
+        payload = video.session_payload or {}
+        items = payload.get("achievements_unlocked") or []
+        return [str(name) for name in items if name]
+
     def _require_settings(self) -> Settings:
         if self.settings is None:
             raise RuntimeError("Settings are required for this operation")
@@ -164,7 +338,11 @@ class MetadataWorkflowService:
         videos = self.db.execute(
             select(VideoAsset)
             .where(VideoAsset.folder_id == video.folder_id)
-            .order_by(VideoAsset.recorded_at.is_(None), VideoAsset.recorded_at.asc(), VideoAsset.created_at.asc())
+            .order_by(
+                VideoAsset.recorded_at.is_(None),
+                VideoAsset.recorded_at.asc(),
+                VideoAsset.created_at.asc(),
+            )
         ).scalars()
 
         for index, item in enumerate(videos, start=1):
@@ -185,105 +363,7 @@ class MetadataWorkflowService:
         payload["achievements_unlocked"] = [item.get("name") for item in matched if item.get("name")]
         payload["achievements_unlocked_detailed"] = matched
         video.session_payload = payload
-
-    def _build_title(self, folder: SeriesFolder, video: VideoAsset, episode_number: int) -> str:
-        return f"{folder.name} Gameplay PT-BR | Episodio {episode_number:02d}"
-
-    def _build_tags(self, folder: SeriesFolder, defaults: ChannelDefaults) -> list[str]:
-        tags = [folder.name.lower(), "gameplay", "sem comentarios", "pt-br", *defaults.default_tags]
-
-        per_game = get_game_tag_defaults()
-        folder_key = folder.name.strip().lower()
-        for game_name, game_tags in per_game.items():
-            game_key = game_name.strip().lower()
-            if game_key and (game_key == folder_key or game_key in folder_key or folder_key in game_key):
-                tags.extend(game_tags)
-
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for tag in tags:
-            clean = " ".join(tag.split()).strip()
-            if not clean:
-                continue
-            lowered = clean.lower()
-            if lowered in seen:
-                continue
-            seen.add(lowered)
-            normalized.append(clean)
-        return normalized[:15]
-
-    def _build_description(
-        self,
-        folder: SeriesFolder,
-        video: VideoAsset,
-        defaults: ChannelDefaults,
-        episode_number: int,
-    ) -> str:
-        payload = video.session_payload or {}
-        achievements = payload.get("achievements_unlocked") or []
-        playtime = payload.get("playtime_minutes")
-        duration_minutes = (video.duration_sec // 60) if video.duration_sec else None
-        duration = f"{duration_minutes} minutos" if duration_minutes is not None else "duracao indisponivel"
-
-        folder_name = (folder.name or "").lower()
-        if "resident evil" in folder_name or "requiem" in folder_name:
-            lines = [
-                (
-                    f"No episódio {episode_number:02d} de Resident Evil Requiem (Resident Evil 9), "
-                    "acompanhe gameplay sem comentários em PT-BR com foco na progressão da campanha, "
-                    "exploração, combate e clima de survival horror."
-                ),
-                "",
-                "Conteúdo deste vídeo:",
-                "- Gameplay sem comentários (no commentary)",
-                "- Trechos com Claire e Leon",
-                "- Exploração + combate + progressão de história",
-                "- Conquistas desbloqueadas durante a gameplay",
-                "",
-                f"Jogo: {folder.name}",
-                f"Idioma: {defaults.language}",
-                f"Plataforma: PC ({defaults.pc_config})",
-                f"Duração: ~{duration_minutes} min" if duration_minutes is not None else "Duração: indisponível",
-            ]
-            if playtime is not None:
-                lines.append(f"Playtime Steam no período: {playtime} minutos")
-            lines.append(self._achievements_line(achievements))
-            if video.thumbnail_prompt:
-                lines.append(f"Prompt thumbnail: {video.thumbnail_prompt}")
-            lines.extend(
-                [
-                    "",
-                    defaults.default_description_block,
-                    "",
-                    "Se curtir, deixa o like e se inscreve para acompanhar a série completa.",
-                    "Canal: https://www.youtube.com/@aggresiveHamster",
-                    "",
-                    "#ResidentEvilRequiem #ResidentEvil9 #GameplayPTBR #SemComentarios #SurvivalHorror",
-                ]
-            )
-            return "\n".join(lines)
-
-        lines = [
-            f"Serie: {folder.name}",
-            f"Episodio: {episode_number:02d}",
-            f"Idioma: {defaults.language}",
-            f"Formato: gameplay sem comentarios",
-            f"Duracao aproximada: {duration}",
-        ]
-        if playtime is not None:
-            lines.append(f"Playtime Steam no periodo: {playtime} minutos")
-        lines.append(self._achievements_line(achievements))
-        if video.thumbnail_prompt:
-            lines.append(f"Prompt thumbnail: {video.thumbnail_prompt}")
-        lines.append(f"PC: {defaults.pc_config}")
-        lines.append("")
-        lines.append(defaults.default_description_block)
-        return "\n".join(lines)
-
-    def _achievements_line(self, achievements: list) -> str:
-        if achievements:
-            return "Conquistas desbloqueadas: " + ", ".join(str(item) for item in achievements)
-        return "Conquistas desbloqueadas: sem novas conquistas registradas"
+        self.db.commit()
 
     def _generate_thumbnail(self, video: VideoAsset, episode_number: int) -> str | None:
         return EpisodeThumbnailRenderer.render(
@@ -294,6 +374,16 @@ class MetadataWorkflowService:
         )
 
 
+def _playtime_minutes(video: VideoAsset) -> int | None:
+    payload = video.session_payload or {}
+    value = payload.get("playtime_minutes")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+# ---- module-level facade used by routers/tests --------------------------
 def generate_metadata_draft(db: Session, settings: Settings, video_id: str) -> MetadataDraft:
     return MetadataWorkflowService(db, settings).generate_draft(video_id)
 

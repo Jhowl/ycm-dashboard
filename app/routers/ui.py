@@ -280,7 +280,7 @@ def series_news_partial(slug: str, request: Request, db: Session = Depends(get_d
     return templates.TemplateResponse(
         name="partials/steam_news.html",
         request=request,
-        context={"folder": folder, "steam_news": steam_news},
+        context={"folder": folder, "steam_news": steam_news, "include_wrapper": True},
     )
 
 

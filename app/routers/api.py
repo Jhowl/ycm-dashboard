@@ -199,13 +199,13 @@ def trigger_transcription(video_id: str, request: Request, db: Session = Depends
             detail="Whisper is disabled (set YCM_WHISPER_ENABLED=true)",
         )
 
-    task_id: str | None = None
+    task_id = None
     try:
         from worker.tasks import transcribe_video_task
 
         async_result = transcribe_video_task.delay(video_id)
         task_id = async_result.id
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Celery unavailable: {exc}",
@@ -230,7 +230,7 @@ def get_video_transcript(video_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
 
     transcript = load_transcript(video)
-    segments: list[TranscriptSegmentOut] = []
+    segments = []
     text = video.transcript_text
     language = video.transcript_language
 

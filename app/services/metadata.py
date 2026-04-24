@@ -1,13 +1,13 @@
 """Video metadata generation workflow.
 
-The pipeline orchestrates:
+Pipeline orchestrated here:
   - Steam achievements lookup (for the recorded window)
   - Transcript excerpt + chapters (when available, via Ollama)
   - Ollama-driven PT-BR title / description / tags / thumbnail prompt
   - Template-based fallback when Ollama is disabled or unreachable
 
-Fallback output is stable — existing tests validate exact strings like
-``"Gameplay PT-BR"`` and ``"Prompt thumbnail: ..."`` in the description.
+The fallback output is stable so legacy tests asserting exact strings like
+"Gameplay PT-BR" and "Prompt thumbnail: ..." keep passing.
 """
 from __future__ import annotations
 
@@ -92,10 +92,6 @@ class MetadataWorkflowService:
                 transcript_segments=transcript.get("segments") or [],
             )
 
-        # Description composition:
-        # - Use Ollama body when available; otherwise template fallback.
-        # - Always append a deterministic suffix so existing tests (and UI) can
-        #   rely on the defaults block + thumbnail prompt being present.
         description = self._compose_description(
             base_description=content.description,
             chapters=chapters,
@@ -108,7 +104,6 @@ class MetadataWorkflowService:
         tags = self._finalize_tags(folder, defaults, content.tags, per_game_tags)
         title = self._finalize_title(content.title, folder, episode_number, content.used_fallback)
 
-        # Deactivate previous drafts
         for draft in video.drafts:
             draft.is_active = False
 
@@ -217,9 +212,6 @@ class MetadataWorkflowService:
         episode_number: int,
         used_fallback: bool,
     ) -> str:
-        """Keep the deterministic template when LLM is offline; otherwise honor
-        the LLM output but ensure the ``Episodio NN`` suffix stays present.
-        """
         if used_fallback:
             return f"{folder.name} Gameplay PT-BR | Episodio {episode_number:02d}"
 
@@ -246,7 +238,6 @@ class MetadataWorkflowService:
         if chapters_block and chapters_block not in base:
             pieces.append(chapters_block)
 
-        # Deterministic suffix — tests rely on these lines existing.
         suffix_lines: list[str] = []
         if playtime is not None:
             suffix_lines.append(f"Playtime Steam no periodo: {playtime} minutos")
@@ -262,7 +253,6 @@ class MetadataWorkflowService:
         if suffix_lines:
             pieces.append("\n".join(suffix_lines))
 
-        # Canal/hashtag footer (only for LLM output; fallback description already has its own style)
         if not used_fallback:
             pieces.append(
                 "Canal: https://www.youtube.com/@aggresiveHamster\n#GameplayPTBR #SemComentarios"

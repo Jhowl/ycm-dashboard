@@ -8,9 +8,28 @@
     <div>
       <h1>{{ folder.name }}</h1>
       <p><code>{{ folder.path }}</code></p>
+      {% if folder.steam_game_name %}
+        <p class="muted">Steam: {{ folder.steam_game_name }} · App {{ folder.steam_app_id }}</p>
+      {% endif %}
     </div>
     <span class="badge {{ 'ok' if folder.active else 'muted' }}">{{ 'ativo' if folder.active else 'inativo' }}</span>
   </section>
+
+  {% if folder.steam_app_id %}
+  <section class="card span-2" id="steam-news-card">
+    <div class="series-head">
+      <h2>Novidades Steam</h2>
+      <button type="button"
+              class="subtle"
+              hx-get="/ui/partials/series/{{ folder.slug }}/news"
+              hx-target="#steam-news-card"
+              hx-swap="outerHTML">
+        Atualizar
+      </button>
+    </div>
+    {% include "partials/steam_news.html" %}
+  </section>
+  {% endif %}
 
   <section class="card span-2">
     <div class="series-head">
@@ -23,14 +42,19 @@
         <p class="error-text">❌ {{ notice.replace('erro:', '') }}</p>
       {% else %}
         <p class="ok-text">
-          {% if notice == 'draft_gerado' %}✅ Draft gerado.{% elif notice == 'upload_concluido' %}✅ Upload concluído.{% elif notice.startswith('upload_fila:') %}⏳ Upload em background (task {{ notice.replace('upload_fila:', '') }}).{% else %}✅ Ação concluída.{% endif %}
+          {% if notice == 'draft_gerado' %}✅ Draft gerado.
+          {% elif notice == 'upload_concluido' %}✅ Upload concluído.
+          {% elif notice.startswith('upload_fila:') %}⏳ Upload em background (task {{ notice.replace('upload_fila:', '') }}).
+          {% elif notice.startswith('transcricao_fila:') %}⏳ Transcrição enfileirada (task {{ notice.replace('transcricao_fila:', '') }}).
+          {% else %}✅ Ação concluída.
+          {% endif %}
         </p>
       {% endif %}
     {% endif %}
 
     <div class="video-grid">
       {% for video in videos %}
-        <article class="video-card">
+        <article class="video-card" id="video-{{ video.id }}">
           <div class="video-card-top">
             <h3 title="{{ video.filename }}">
               <a href="/ui/video-settings/{{ video.id }}" class="video-title-link">
@@ -47,12 +71,19 @@
             <span class="chip">{{ video.recorded_at | ny_datetime }}</span>
             <span class="chip">ID {{ video.id[:8] }}</span>
             {% if video.upload_task_status %}
-              <span class="chip">Task: {{ video.upload_task_status }}</span>
+              <span class="chip">Upload: {{ video.upload_task_status }}</span>
             {% endif %}
+            <span class="chip chip-transcript"
+                  hx-get="/ui/partials/videos/{{ video.id }}/transcript-status"
+                  hx-trigger="every 8s [this.textContent.includes('RUNNING') || this.textContent.includes('PENDING')]"
+                  hx-swap="outerHTML">
+              Transcrição: {{ video.transcript_status }}
+            </span>
           </div>
 
           <div class="video-actions">
             <form method="post" action="/ui/videos/{{ video.id }}/generate"><button type="submit">Gerar draft</button></form>
+            <form method="post" action="/ui/videos/{{ video.id }}/transcribe"><button type="submit">Transcrever</button></form>
             <form method="post" action="/ui/videos/{{ video.id }}/upload"><button type="submit">Upload</button></form>
             <form method="post" action="/ui/videos/{{ video.id }}/reject"><button type="submit">Rejeitar</button></form>
             <a class="button-link subtle" href="/ui/video-settings/{{ video.id }}">Video Settings</a>
@@ -81,11 +112,32 @@
             </form>
           </details>
 
+          {% if video.chapters %}
+            <details class="compact-details">
+              <summary>Capítulos ({{ video.chapters|length }})</summary>
+              <ul class="chapter-list">
+                {% for chapter in video.chapters %}
+                  {% set start = chapter.start_seconds %}
+                  {% set hh = start // 3600 %}
+                  {% set mm = (start % 3600) // 60 %}
+                  {% set ss = start % 60 %}
+                  <li>
+                    <code>{% if hh %}{{ '%02d'|format(hh) }}:{% endif %}{{ '%02d'|format(mm) }}:{{ '%02d'|format(ss) }}</code>
+                    {{ chapter.title }}
+                  </li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% endif %}
+
           {% if video.latest_draft %}
             <details class="compact-details">
               <summary>Ver metadados</summary>
               <p><strong>Título:</strong> {{ video.latest_draft.title_ptbr }}</p>
               <p><strong>Tags:</strong> {{ video.latest_draft.tags | join(', ') }}</p>
+              {% if video.latest_draft.model_provider %}
+                <p class="muted">Provider: {{ video.latest_draft.model_provider }}{% if video.latest_draft.model_name %} ({{ video.latest_draft.model_name }}){% endif %}</p>
+              {% endif %}
               <pre>{{ video.latest_draft.description_ptbr }}</pre>
             </details>
           {% endif %}

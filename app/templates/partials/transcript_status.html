@@ -1,0 +1,7 @@
+{%- set status = video.transcript_status or 'PENDING' -%}
+<span class="chip chip-transcript chip-transcript-{{ status|lower }}"
+      hx-get="/ui/partials/videos/{{ video.id }}/transcript-status"
+      {% if status in ('RUNNING', 'PENDING') %}hx-trigger="every 8s"{% endif %}
+      hx-swap="outerHTML">
+  Transcrição: {{ status }}{% if video.transcript_language %} ({{ video.transcript_language }}){% endif %}
+</span>

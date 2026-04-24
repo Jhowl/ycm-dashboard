@@ -849,3 +849,107 @@ pre {
     padding: 0.75rem;
   }
 }
+
+/* ----- HTMX additions (v0.2): Steam news, transcript chips, chapters ----- */
+.news-list {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.news-item {
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 0.8rem 0.9rem;
+  background: var(--surface-2);
+}
+
+.news-item .news-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.3rem;
+}
+
+.news-item a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.news-item a:hover {
+  text-decoration: underline;
+}
+
+.chip-transcript {
+  cursor: default;
+}
+
+.chip-transcript-running {
+  background: rgba(255, 191, 0, 0.15);
+  color: #ffc96b;
+  border-color: rgba(255, 191, 0, 0.35);
+}
+
+.chip-transcript-pending {
+  background: rgba(77, 198, 255, 0.12);
+  color: var(--accent);
+  border-color: rgba(77, 198, 255, 0.3);
+}
+
+.chip-transcript-ready {
+  background: rgba(72, 199, 142, 0.15);
+  color: var(--ok);
+  border-color: rgba(72, 199, 142, 0.35);
+}
+
+.chip-transcript-failed {
+  background: rgba(255, 112, 112, 0.15);
+  color: var(--danger);
+  border-color: rgba(255, 112, 112, 0.35);
+}
+
+.chip-transcript-skipped {
+  background: rgba(158, 176, 195, 0.12);
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.chapter-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.chapter-list li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  font-size: 0.92rem;
+}
+
+.chapter-list code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.82rem;
+  color: var(--accent);
+  min-width: 68px;
+}
+
+.video-title-link {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.video-title-link:hover {
+  color: var(--accent);
+}
+
+button[type="submit"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

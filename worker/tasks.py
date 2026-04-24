@@ -53,8 +53,10 @@ def generate_thumbnail_options_task(video_id: str) -> dict:
     max_retries=3,
 )
 def transcribe_video_task(self, video_id: str) -> dict:
-    """Run Whisper on a video in the background. Optionally chains metadata
-    generation after a successful transcript if ``whisper_auto_run`` is on.
+    """Run Whisper on a video in the background.
+
+    Optionally chains metadata generation after a successful transcript
+    if ``whisper_auto_run`` is on.
     """
     with worker_session() as (settings, db):
         result = transcribe_video(db, settings, video_id)
@@ -70,7 +72,7 @@ def transcribe_video_task(self, video_id: str) -> dict:
     if auto_generate_draft:
         try:
             generate_metadata_task.delay(video_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("Failed to chain metadata task for video=%s err=%s", video_id, exc)
 
     return {

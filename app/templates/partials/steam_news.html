@@ -1,0 +1,35 @@
+{#- Rendered both inline (as card body) in series.html and as outerHTML swap via HTMX.
+    The surrounding <section id="steam-news-card"> is rendered when included as an outerHTML target. -#}
+{% if include_wrapper is not defined %}{% set include_wrapper = false %}{% endif %}
+{% if include_wrapper %}
+<section class="card span-2" id="steam-news-card">
+  <div class="series-head">
+    <h2>Novidades Steam</h2>
+    <button type="button"
+            class="subtle"
+            hx-get="/ui/partials/series/{{ folder.slug }}/news"
+            hx-target="#steam-news-card"
+            hx-swap="outerHTML">
+      Atualizar
+    </button>
+  </div>
+{% endif %}
+  {% if steam_news %}
+    <ul class="news-list">
+      {% for item in steam_news %}
+        <li class="news-item">
+          <div class="news-head">
+            <a href="{{ item.url }}" target="_blank" rel="noreferrer">{{ item.title }}</a>
+            {% if item.date_label %}<span class="muted">{{ item.date_label }}</span>{% endif %}
+          </div>
+          {% if item.feedlabel %}<p class="muted">{{ item.feedlabel }}</p>{% endif %}
+          {% if item.contents_snippet %}<p>{{ item.contents_snippet }}</p>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">Sem notícias recentes para este jogo Steam.</p>
+  {% endif %}
+{% if include_wrapper %}
+</section>
+{% endif %}

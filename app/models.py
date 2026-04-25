@@ -126,10 +126,10 @@ class ChannelDefaults(Base):
 
     # Runtime AI overrides (nullable -> fall back to env Settings)
     ai_ollama_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    ai_ollama_enabled: Mapped[bool | None] = mapped_column(Integer, nullable=True)
+    ai_ollama_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     ai_whisper_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    ai_whisper_enabled: Mapped[bool | None] = mapped_column(Integer, nullable=True)
-    ai_whisper_auto_run: Mapped[bool | None] = mapped_column(Integer, nullable=True)
+    ai_whisper_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    ai_whisper_auto_run: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False

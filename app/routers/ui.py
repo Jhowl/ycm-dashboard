@@ -634,6 +634,9 @@ def video_detail_page(video_id: str, request: Request, db: Session = Depends(get
 
     latest = get_latest_draft(video)
     transcript = load_transcript(video)
+    session_payload = video.session_payload or {}
+    achievements_unlocked = session_payload.get('achievements_unlocked') or []
+    achievements_unlocked_detailed = session_payload.get('achievements_unlocked_detailed') or []
 
     out_dir = thumbnail_lab_dir(video.id)
     thumb_files: list[dict] = []
@@ -650,6 +653,8 @@ def video_detail_page(video_id: str, request: Request, db: Session = Depends(get
             "latest_draft": latest,
             "transcript": transcript,
             "thumb_files": thumb_files,
+            "achievements_unlocked": achievements_unlocked,
+            "achievements_unlocked_detailed": achievements_unlocked_detailed,
             "episode_links": _episode_links_for_folder(db, folder, video.id) if folder else [],
         },
     )

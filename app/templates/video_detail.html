@@ -200,6 +200,28 @@
       </dl>
     </section>
 
+    {% if achievements_unlocked_detailed or achievements_unlocked %}
+      <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+        <h2 class="mb-3 text-sm font-semibold tracking-tight">Achievements for this video</h2>
+        {% if achievements_unlocked_detailed %}
+          <div class="space-y-2 text-sm">
+            {% for ach in achievements_unlocked_detailed %}
+              <div class="rounded-lg border border-ink-800 bg-ink-950/60 px-3 py-2">
+                <div class="font-medium text-ink-100">{{ ach.displayName or ach.name or ach.apiName }}</div>
+                {% if ach.description %}<div class="mt-1 text-xs text-ink-400">{{ ach.description }}</div>{% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="space-y-2 text-sm">
+            {% for ach in achievements_unlocked %}
+              <div class="rounded-lg border border-ink-800 bg-ink-950/60 px-3 py-2 text-ink-200">{{ ach }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </section>
+    {% endif %}
+
     {% if thumb_files %}
       <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
         <h2 class="mb-3 text-sm font-semibold tracking-tight">Thumbnails</h2>

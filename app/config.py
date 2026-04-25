@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     whisper_model: str = "small"          # tiny, base, small, medium, large-v3
     whisper_device: str = "auto"          # auto, cpu, cuda
     whisper_compute_type: str = "auto"    # auto, int8, float16, float32
-    whisper_language: str = "pt"
+    whisper_language: str = "en"
     whisper_auto_run: bool = True
 
     # --- Steam -------------------------------------------------------------

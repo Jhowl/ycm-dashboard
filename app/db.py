@@ -45,11 +45,12 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str, str | None]]] = {
         ("model_name", "VARCHAR(128)", None),
     ],
     "channel_defaults": [
+        ("ai_ollama_url", "VARCHAR(255)", None),
         ("ai_ollama_model", "VARCHAR(128)", None),
-        ("ai_ollama_enabled", "INTEGER", None),
+        ("ai_ollama_enabled", "BOOLEAN", None),
         ("ai_whisper_model", "VARCHAR(128)", None),
-        ("ai_whisper_enabled", "INTEGER", None),
-        ("ai_whisper_auto_run", "INTEGER", None),
+        ("ai_whisper_enabled", "BOOLEAN", None),
+        ("ai_whisper_auto_run", "BOOLEAN", None),
     ],
 }
 

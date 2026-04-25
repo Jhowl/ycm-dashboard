@@ -26,10 +26,57 @@ from app.services.errors import ConflictError, NotFoundError, ValidationError
 from app.services.game_defaults import get_game_tag_defaults
 from app.services.media import EpisodeThumbnailRenderer
 from app.services.ollama import OllamaClient, format_chapters_for_description
+
+
+
+def _seconds_to_hhmmss(total_seconds: int) -> str:
+    total_seconds = max(0, int(total_seconds))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def _build_achievement_timeline(recorded_at, duration_sec, achievements_unlocked_detailed):
+    if not recorded_at or not duration_sec or not achievements_unlocked_detailed:
+        return []
+    end_at = recorded_at + timedelta(seconds=int(duration_sec))
+    timeline = []
+    for ach in achievements_unlocked_detailed or []:
+        unlocked_at = ach.get('unlockedAt') or ach.get('unlock_time') or ach.get('unlockTime')
+        if not unlocked_at:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(unlocked_at).replace('Z', '+00:00'))
+        except Exception:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if recorded_at <= ts <= end_at:
+            offset = int((ts - recorded_at).total_seconds())
+            timeline.append({
+                'timecode': _seconds_to_hhmmss(offset),
+                'name': ach.get('displayName') or ach.get('name') or ach.get('apiName') or 'Achievement',
+                'description': ach.get('description') or '',
+            })
+    return timeline
 from app.services.steam import get_achievements_for_window
 from app.services.transcription import load_transcript
 from app.services.youtube_publish import upload_video_to_youtube
 from app.time_utils import format_datetime_ny
+
+
+def _append_achievement_timeline(description: str | None, achievement_timeline) -> str | None:
+    if not description or not achievement_timeline:
+        return description
+    lines = [description.rstrip(), '', 'Achievements during this video:']
+    for ach in achievement_timeline:
+        extra = f" — {ach['description']}" if ach.get('description') else ''
+        lines.append(f"- [{ach['timecode']}] {ach['name']}{extra}")
+    return "\n".join(lines).strip()
+
 
 logger = get_logger(__name__)
 

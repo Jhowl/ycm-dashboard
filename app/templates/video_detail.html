@@ -1,6 +1,48 @@
 {% extends "base.html" %}
-{% block title %}{{ video.filename }} · YCM{% endblock %}
-{% block heading %}{{ video.filename }}{% endblock %}
+{% block title %}{{ video.filename }} · YCM<div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
+<script>
+(function(){
+  const indicator = document.getElementById('ollama-waiting-indicator');
+  function show(){ if(indicator) indicator.classList.remove('hidden'); }
+  function hide(){ if(indicator) indicator.classList.add('hidden'); }
+  document.querySelectorAll('form').forEach((form)=>{
+    const action = form.getAttribute('action') || '';
+    if(action.includes('/generate')){
+      form.addEventListener('submit', show);
+    }
+  });
+  document.body.addEventListener('htmx:beforeRequest', (e)=>{
+    const path = e.detail?.pathInfo?.requestPath || '';
+    if(path.includes('/generate')) show();
+  });
+  document.body.addEventListener('htmx:afterRequest', hide);
+  document.body.addEventListener('htmx:responseError', hide);
+  window.addEventListener('pageshow', hide);
+})();
+</script>
+{% endblock %}
+{% block heading %}{{ video.filename }}<div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
+<script>
+(function(){
+  const indicator = document.getElementById('ollama-waiting-indicator');
+  function show(){ if(indicator) indicator.classList.remove('hidden'); }
+  function hide(){ if(indicator) indicator.classList.add('hidden'); }
+  document.querySelectorAll('form').forEach((form)=>{
+    const action = form.getAttribute('action') || '';
+    if(action.includes('/generate')){
+      form.addEventListener('submit', show);
+    }
+  });
+  document.body.addEventListener('htmx:beforeRequest', (e)=>{
+    const path = e.detail?.pathInfo?.requestPath || '';
+    if(path.includes('/generate')) show();
+  });
+  document.body.addEventListener('htmx:afterRequest', hide);
+  document.body.addEventListener('htmx:responseError', hide);
+  window.addEventListener('pageshow', hide);
+})();
+</script>
+{% endblock %}
 
 {% block breadcrumbs %}
 <nav class="flex items-center gap-2 text-sm text-ink-400 min-w-0">
@@ -10,6 +52,27 @@
   <span class="text-ink-600">/</span>
   <span class="text-ink-100 truncate">Episódio {{ video.series_number or '—' }}</span>
 </nav>
+<div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
+<script>
+(function(){
+  const indicator = document.getElementById('ollama-waiting-indicator');
+  function show(){ if(indicator) indicator.classList.remove('hidden'); }
+  function hide(){ if(indicator) indicator.classList.add('hidden'); }
+  document.querySelectorAll('form').forEach((form)=>{
+    const action = form.getAttribute('action') || '';
+    if(action.includes('/generate')){
+      form.addEventListener('submit', show);
+    }
+  });
+  document.body.addEventListener('htmx:beforeRequest', (e)=>{
+    const path = e.detail?.pathInfo?.requestPath || '';
+    if(path.includes('/generate')) show();
+  });
+  document.body.addEventListener('htmx:afterRequest', hide);
+  document.body.addEventListener('htmx:responseError', hide);
+  window.addEventListener('pageshow', hide);
+})();
+</script>
 {% endblock %}
 
 {% block actions %}
@@ -28,6 +91,27 @@
     Gerar metadata
   </button>
 </div>
+<div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
+<script>
+(function(){
+  const indicator = document.getElementById('ollama-waiting-indicator');
+  function show(){ if(indicator) indicator.classList.remove('hidden'); }
+  function hide(){ if(indicator) indicator.classList.add('hidden'); }
+  document.querySelectorAll('form').forEach((form)=>{
+    const action = form.getAttribute('action') || '';
+    if(action.includes('/generate')){
+      form.addEventListener('submit', show);
+    }
+  });
+  document.body.addEventListener('htmx:beforeRequest', (e)=>{
+    const path = e.detail?.pathInfo?.requestPath || '';
+    if(path.includes('/generate')) show();
+  });
+  document.body.addEventListener('htmx:afterRequest', hide);
+  document.body.addEventListener('htmx:responseError', hide);
+  window.addEventListener('pageshow', hide);
+})();
+</script>
 {% endblock %}
 
 {% block content %}
@@ -234,4 +318,25 @@
     {% endif %}
   </aside>
 </div>
+<div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
+<script>
+(function(){
+  const indicator = document.getElementById('ollama-waiting-indicator');
+  function show(){ if(indicator) indicator.classList.remove('hidden'); }
+  function hide(){ if(indicator) indicator.classList.add('hidden'); }
+  document.querySelectorAll('form').forEach((form)=>{
+    const action = form.getAttribute('action') || '';
+    if(action.includes('/generate')){
+      form.addEventListener('submit', show);
+    }
+  });
+  document.body.addEventListener('htmx:beforeRequest', (e)=>{
+    const path = e.detail?.pathInfo?.requestPath || '';
+    if(path.includes('/generate')) show();
+  });
+  document.body.addEventListener('htmx:afterRequest', hide);
+  document.body.addEventListener('htmx:responseError', hide);
+  window.addEventListener('pageshow', hide);
+})();
+</script>
 {% endblock %}

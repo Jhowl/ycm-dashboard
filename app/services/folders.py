@@ -6,6 +6,7 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from slugify import slugify
 from sqlalchemy import func, select
@@ -239,6 +240,9 @@ def to_series_slug(name: str) -> str:
     return value[:120]
 
 
+LOCAL_RECORDING_TZ = ZoneInfo("America/New_York")
+
+
 def parse_recorded_at_from_filename(filename: str) -> datetime | None:
     match = re.search(r"(\d{4}-\d{2}-\d{2})[ _](\d{2})[-:](\d{2})[-:](\d{2})", filename)
     if not match:
@@ -246,7 +250,8 @@ def parse_recorded_at_from_filename(filename: str) -> datetime | None:
 
     date_part, hour, minute, second = match.groups()
     try:
-        return datetime.fromisoformat(f"{date_part}T{hour}:{minute}:{second}+00:00")
+        local_dt = datetime.fromisoformat(f"{date_part}T{hour}:{minute}:{second}").replace(tzinfo=LOCAL_RECORDING_TZ)
+        return local_dt.astimezone(timezone.utc)
     except ValueError:
         return None
 

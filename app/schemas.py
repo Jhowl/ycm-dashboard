@@ -51,6 +51,9 @@ class VideoOut(BaseModel):
     transcript_error: str | None = None
     chapters: list[ChapterOut] = Field(default_factory=list)
     latest_draft: DraftOut | None = None
+    ollama_status: str = "IDLE"
+    ollama_progress: dict[str, Any] = Field(default_factory=dict)
+    ollama_error: str | None = None
 
 
 class FolderOut(BaseModel):

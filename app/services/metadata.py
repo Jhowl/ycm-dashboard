@@ -25,7 +25,8 @@ from app.services.channel import get_or_create_channel_defaults
 from app.services.errors import ConflictError, NotFoundError, ValidationError
 from app.services.game_defaults import get_game_tag_defaults
 from app.services.media import EpisodeThumbnailRenderer
-from app.services.ollama import OllamaClient, format_chapters_for_description
+from app.services.ollama import OllamaClient, OllamaContent, format_chapters_for_description
+from app.services import ollama_progress as progress
 
 
 
@@ -111,33 +112,139 @@ class MetadataWorkflowService:
 
         episode_number = self._resolve_episode_number(video)
         transcript = load_transcript(video)
+        transcript_text = (transcript or {}).get("text") if transcript else None
         per_game_tags = self._per_game_tags(folder)
         achievements = self._achievement_names(video)
 
         ollama = OllamaClient(settings)
-        content = ollama.generate_video_content(
+
+        # Reset progress at start so the UI chip shows live status.
+        progress.reset(self.db, video.id)
+
+        # Always compute the deterministic fallback first so any failed step
+        # has a sensible value to fall back to.
+        fallback = ollama._fallback_content(
             game_name=folder.name,
             episode_number=episode_number,
-            duration_minutes=(video.duration_sec // 60) if video.duration_sec else None,
-            recorded_at_label=format_datetime_ny(video.recorded_at) if video.recorded_at else None,
-            channel_language=defaults.language,
-            pc_config=defaults.pc_config,
             default_description_block=defaults.default_description_block,
             default_tags=list(defaults.default_tags or []),
             per_game_tags=per_game_tags,
             achievements=achievements,
-            transcript_excerpt=(transcript or {}).get("text"),
             thumbnail_hint=video.thumbnail_prompt,
         )
 
-        chapters: list[dict[str, Any]] = content.chapters
-        if transcript and not chapters and ollama.is_enabled():
-            chapters = ollama.generate_chapters(
-                game_name=folder.name,
-                episode_number=episode_number,
-                duration_seconds=int(video.duration_sec or 0),
-                transcript_segments=transcript.get("segments") or [],
-            )
+        used_fallback = not ollama.is_enabled()
+        title_val = fallback.title
+        tags_val = list(fallback.tags)
+        thumb_prompt_val = fallback.thumbnail_prompt
+        desc_val = fallback.description
+
+        if ollama.is_enabled():
+            # 1. title
+            progress.mark_running(self.db, video.id, "title")
+            try:
+                t = ollama.gen_title(
+                    game_name=folder.name,
+                    episode_number=episode_number,
+                    transcript_excerpt=transcript_text,
+                    achievements=achievements,
+                )
+                if t:
+                    title_val = t
+                    progress.mark_done(self.db, video.id, "title")
+                else:
+                    progress.mark_failed(self.db, video.id, "title", "no response")
+                    used_fallback = True
+            except Exception as exc:
+                progress.mark_failed(self.db, video.id, "title", str(exc))
+                used_fallback = True
+
+            # 2. tags
+            progress.mark_running(self.db, video.id, "tags")
+            try:
+                tg = ollama.gen_tags(
+                    game_name=folder.name,
+                    default_tags=list(defaults.default_tags or []),
+                    per_game_tags=per_game_tags,
+                    transcript_excerpt=transcript_text,
+                )
+                if tg:
+                    tags_val = tg
+                    progress.mark_done(self.db, video.id, "tags")
+                else:
+                    progress.mark_failed(self.db, video.id, "tags", "no response")
+            except Exception as exc:
+                progress.mark_failed(self.db, video.id, "tags", str(exc))
+
+            # 3. thumbnail_prompt
+            progress.mark_running(self.db, video.id, "thumbnail_prompt")
+            try:
+                tp = ollama.gen_thumbnail_prompt(
+                    game_name=folder.name,
+                    episode_number=episode_number,
+                    hint=video.thumbnail_prompt,
+                )
+                if tp:
+                    thumb_prompt_val = tp
+                    progress.mark_done(self.db, video.id, "thumbnail_prompt")
+                else:
+                    progress.mark_failed(self.db, video.id, "thumbnail_prompt", "no response")
+            except Exception as exc:
+                progress.mark_failed(self.db, video.id, "thumbnail_prompt", str(exc))
+        else:
+            for step in ("title", "tags", "thumbnail_prompt"):
+                progress.mark_skipped(self.db, video.id, step)
+
+        # 4. chapters — only if we have a transcript and Ollama is on
+        chapters: list[dict[str, Any]] = []
+        if ollama.is_enabled() and transcript:
+            progress.mark_running(self.db, video.id, "chapters")
+            try:
+                chapters = ollama.generate_chapters(
+                    game_name=folder.name,
+                    episode_number=episode_number,
+                    duration_seconds=int(video.duration_sec or 0),
+                    transcript_segments=transcript.get("segments") or [],
+                )
+                progress.mark_done(self.db, video.id, "chapters")
+            except Exception as exc:
+                progress.mark_failed(self.db, video.id, "chapters", str(exc))
+        else:
+            progress.mark_skipped(self.db, video.id, "chapters")
+
+        # 5. description (depends on chapters)
+        if ollama.is_enabled():
+            progress.mark_running(self.db, video.id, "description")
+            try:
+                d = ollama.gen_description(
+                    game_name=folder.name,
+                    episode_number=episode_number,
+                    transcript_excerpt=transcript_text,
+                    achievements=achievements,
+                    chapters=chapters,
+                    default_block=defaults.default_description_block,
+                )
+                if d:
+                    desc_val = d
+                    progress.mark_done(self.db, video.id, "description")
+                else:
+                    progress.mark_failed(self.db, video.id, "description", "no response")
+                    used_fallback = True
+            except Exception as exc:
+                progress.mark_failed(self.db, video.id, "description", str(exc))
+                used_fallback = True
+        else:
+            progress.mark_skipped(self.db, video.id, "description")
+
+        content = OllamaContent(
+            title=title_val,
+            description=desc_val,
+            tags=tags_val,
+            thumbnail_prompt=thumb_prompt_val,
+            chapters=chapters,
+            used_fallback=used_fallback,
+            model=settings.ollama_model if ollama.is_enabled() else None,
+        )
 
         description = self._compose_description(
             base_description=content.description,

@@ -125,6 +125,85 @@ class OllamaClient:
             model=self.settings.ollama_model,
         )
 
+    # ---- focused per-part generators (faster perceived latency) -------
+    def gen_title(self, *, game_name: str, episode_number: int, transcript_excerpt: str | None,
+                  achievements: list[str] | None = None) -> str | None:
+        if not self.is_enabled():
+            return None
+        ctx = (transcript_excerpt or "").strip()[:1200]
+        ach = ", ".join((achievements or [])[:6])
+        prompt = (
+            "Voce e um redator de YouTube em portugues do Brasil. "
+            f"Crie um titulo curto e clickbait moderado para o episodio {episode_number} de {game_name}. "
+            "Maximo 95 caracteres. Sem emojis. Inclua o nome do jogo. "
+            f"Achievements recentes: {ach or 'nenhum'}. "
+            f"Trecho do video: {ctx or '(sem transcricao)'}.\n"
+            'Responda JSON: {"title": "..."}'
+        )
+        raw = self._call(prompt, temperature=0.5)
+        parsed = self._parse_json(raw) if raw else None
+        title = (parsed or {}).get("title") if isinstance(parsed, dict) else None
+        return str(title).strip()[:100] if title else None
+
+    def gen_tags(self, *, game_name: str, default_tags: list[str], per_game_tags: list[str],
+                 transcript_excerpt: str | None) -> list[str] | None:
+        if not self.is_enabled():
+            return None
+        ctx = (transcript_excerpt or "").strip()[:1000]
+        prompt = (
+            f"Liste 12 tags em portugues do Brasil para um video de gameplay de {game_name}. "
+            "Apenas palavras curtas e frases de 1-3 palavras, sem #, sem virgulas dentro da tag. "
+            f"Tags base: {', '.join(default_tags + per_game_tags)}. "
+            f"Trecho do video: {ctx or '(sem transcricao)'}.\n"
+            'Responda JSON: {"tags": ["...","..."]}'
+        )
+        raw = self._call(prompt, temperature=0.3)
+        parsed = self._parse_json(raw) if raw else None
+        items = (parsed or {}).get("tags") if isinstance(parsed, dict) else None
+        if not isinstance(items, list):
+            return None
+        return _dedupe_tags(items)
+
+    def gen_description(self, *, game_name: str, episode_number: int, transcript_excerpt: str | None,
+                        achievements: list[str] | None = None,
+                        chapters: list[dict[str, Any]] | None = None,
+                        default_block: str = "") -> str | None:
+        if not self.is_enabled():
+            return None
+        ctx = (transcript_excerpt or "").strip()[:2000]
+        ach = "; ".join((achievements or [])[:8])
+        chap_lines = format_chapters_for_description(chapters or [])
+        prompt = (
+            "Escreva uma descricao de YouTube em portugues do Brasil. "
+            "Tom: descontraido e direto. Sem emojis em excesso. "
+            f"Jogo: {game_name}. Episodio: {episode_number}. "
+            f"Conquistas relevantes: {ach or 'nenhuma'}. "
+            f"Trecho: {ctx or '(sem transcricao)'}. "
+            "Inclua um paragrafo curto (3-4 frases). "
+            "Depois, deixe linha em branco e SE houver capitulos abaixo, mantenha-os literalmente como estao. "
+            f"Capitulos:\n{chap_lines or '(sem capitulos)'}.\n"
+            'Responda JSON: {"description": "..."}'
+        )
+        raw = self._call(prompt, temperature=0.6)
+        parsed = self._parse_json(raw) if raw else None
+        desc = (parsed or {}).get("description") if isinstance(parsed, dict) else None
+        return str(desc).strip() if desc else None
+
+    def gen_thumbnail_prompt(self, *, game_name: str, episode_number: int,
+                             hint: str | None) -> str | None:
+        if not self.is_enabled():
+            return None
+        prompt = (
+            f"Sugira um prompt curto (max 200 chars) para gerar uma thumbnail de YouTube do "
+            f"episodio {episode_number} de {game_name}. Estilo cinematografico, alto contraste. "
+            f"Tema sugerido pelo usuario: {hint or 'livre'}. "
+            'Responda JSON: {"thumbnail_prompt": "..."}'
+        )
+        raw = self._call(prompt, temperature=0.6)
+        parsed = self._parse_json(raw) if raw else None
+        out = (parsed or {}).get("thumbnail_prompt") if isinstance(parsed, dict) else None
+        return str(out).strip()[:240] if out else None
+
     def generate_chapters(
         self,
         *,
@@ -181,15 +260,16 @@ class OllamaClient:
         return value or self._default_thumbnail_prompt(game_name, episode_number, hint)
 
     # ---- internal -------------------------------------------------------
-    def _call(self, prompt: str) -> str | None:
+    def _call(self, prompt: str, *, fmt: str | None = "json", temperature: float = 0.4) -> str | None:
         url = f"{self.settings.ollama_base_url.rstrip('/')}/api/generate"
-        body = {
+        body: dict[str, Any] = {
             "model": self.settings.ollama_model,
             "prompt": prompt,
             "stream": False,
-            "format": "json",
-            "options": {"temperature": 0.4, "top_p": 0.9, "num_ctx": 8192},
+            "options": {"temperature": temperature, "top_p": 0.9, "num_ctx": 8192},
         }
+        if fmt:
+            body["format"] = fmt
         try:
             with httpx.Client(timeout=self.settings.ollama_timeout_seconds) as client:
                 resp = client.post(url, json=body)

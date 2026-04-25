@@ -164,6 +164,11 @@
           </a>
         {% endif %}
       </div>
+
+      <!-- Ollama generation chip with per-step progress -->
+      <div class="mt-4 border-t border-ink-800 pt-3">
+        {% include "partials/ollama_status.html" %}
+      </div>
     </section>
 
     <!-- Transcript viewer -->

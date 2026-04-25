@@ -81,6 +81,7 @@ def home(request: Request, db: Session = Depends(get_db)):
 @router.get("/config")
 def config_page(request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
+    settings = apply_runtime_overrides(settings, db)
     defaults = get_or_create_channel_defaults(db, settings)
     youtube_token_exists, youtube_token_updated_at = get_youtube_token_status(settings.youtube_token_file)
     ollama_status = OllamaClient(settings).health()
@@ -436,12 +437,31 @@ def thumbnail_lab_asset(video_id: str, filename: str, download: int = 0, v: int 
 
 @router.post("/ui/videos/{video_id}/generate")
 def generate_video_ui(video_id: str, request: Request, db: Session = Depends(get_db)):
-    settings = request.app.state.settings
+    """Enqueue metadata generation in the background.
+
+    Sets ollama_status=PENDING immediately so the UI chip starts polling.
+    The Celery task picks the latest runtime overrides via worker_session().
+    """
+    video = db.get(VideoAsset, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    from app.services import ollama_progress as _progress
+    _progress.reset(db, video_id)
+
     try:
-        generate_metadata_draft(db, settings, video_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _redirect_back(request, notice="draft_gerado")
+        from worker.tasks import generate_metadata_task
+        generate_metadata_task.delay(video_id)
+    except Exception as exc:
+        # Fall back to synchronous if broker unreachable
+        settings = request.app.state.settings
+        settings = apply_runtime_overrides(settings, db)
+        try:
+            generate_metadata_draft(db, settings, video_id)
+        except ValueError as inner:
+            raise HTTPException(status_code=404, detail=str(inner)) from inner
+        return _redirect_back(request, notice="draft_gerado_sync")
+    return _redirect_back(request, notice="draft_enfileirado")
 
 
 @router.post("/ui/videos/{video_id}/transcribe")
@@ -601,6 +621,7 @@ def youtube_oauth_callback(
 from app.models import MetadataDraft  # noqa: E402
 from app.services.jobs import collect_jobs  # noqa: E402
 from app.services.runtime_settings import (  # noqa: E402
+    apply_runtime_overrides,
     get_runtime_ai,
     update_runtime_ai,
 )
@@ -725,6 +746,7 @@ def jobs_list_partial(request: Request):
 @router.get("/ui/partials/ollama-pulse")
 def ollama_pulse_partial(request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
+    settings = apply_runtime_overrides(settings, db)
     runtime = get_runtime_ai(db, settings)
     eff = settings.model_copy(update={"ollama_model": runtime.ollama_model})
     health = OllamaClient(eff).health()
@@ -742,6 +764,7 @@ def ollama_pulse_partial(request: Request, db: Session = Depends(get_db)):
 @router.get("/settings", include_in_schema=False)
 def settings_page(request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
+    settings = apply_runtime_overrides(settings, db)
     runtime = get_runtime_ai(db, settings)
     defaults = get_or_create_channel_defaults(db, settings)
     youtube_token_exists, youtube_token_updated_at = get_youtube_token_status(settings.youtube_token_file)
@@ -790,6 +813,7 @@ def settings_update_runtime_ai(
 @router.get("/ui/partials/ollama-models")
 def ollama_models_partial(request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
+    settings = apply_runtime_overrides(settings, db)
     runtime = get_runtime_ai(db, settings)
     eff = settings.model_copy(update={"ollama_model": runtime.ollama_model})
     health = OllamaClient(eff).health()
@@ -802,4 +826,16 @@ def ollama_models_partial(request: Request, db: Session = Depends(get_db)):
             "current": runtime.ollama_model,
             "reason": health.get("reason"),
         },
+    )
+
+
+@router.get("/ui/partials/videos/{video_id}/ollama-status")
+def ollama_status_partial(video_id: str, request: Request, db: Session = Depends(get_db)):
+    video = db.get(VideoAsset, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    return templates.TemplateResponse(
+        name="partials/ollama_status.html",
+        request=request,
+        context={"video": video_to_schema(video)},
     )

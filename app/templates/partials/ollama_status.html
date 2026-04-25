@@ -1,0 +1,35 @@
+{%- set status = video.ollama_status or 'IDLE' -%}
+<div id="ollama-chip-{{ video.id }}"
+     hx-get="/ui/partials/videos/{{ video.id }}/ollama-status"
+     {% if status in ('PENDING','RUNNING') %}hx-trigger="every 3s"{% endif %}
+     hx-swap="outerHTML"
+     class="space-y-2">
+  <div class="flex items-center gap-2 flex-wrap">
+    <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]
+                 {% if status == 'READY' %}border-ok-500/40 bg-ok-500/10 text-ok-400
+                 {% elif status == 'RUNNING' %}border-warn-500/40 bg-warn-500/10 text-warn-400
+                 {% elif status == 'PENDING' %}border-accent-500/40 bg-accent-500/10 text-accent-400
+                 {% elif status == 'FAILED' %}border-bad-500/40 bg-bad-500/10 text-bad-400
+                 {% else %}border-ink-700 bg-ink-850 text-ink-300{% endif %}">
+      {% if status == 'RUNNING' %}<svg class="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>{% endif %}
+      Ollama: {{ status }}
+    </span>
+  </div>
+  {% if video.ollama_progress %}
+    <div class="flex flex-wrap gap-1">
+      {% for step, st in video.ollama_progress.items() %}
+        <span class="rounded-md px-1.5 py-0.5 text-[10px] font-mono
+                     {% if st == 'DONE' %}bg-ok-500/15 text-ok-400
+                     {% elif st == 'RUNNING' %}bg-warn-500/15 text-warn-400
+                     {% elif st == 'FAILED' %}bg-bad-500/15 text-bad-400
+                     {% elif st == 'SKIPPED' %}bg-ink-800 text-ink-500 line-through
+                     {% else %}bg-ink-800 text-ink-400{% endif %}">
+          {{ step }}{% if st == 'DONE' %} ✓{% elif st == 'FAILED' %} ✗{% endif %}
+        </span>
+      {% endfor %}
+    </div>
+  {% endif %}
+  {% if video.ollama_error %}
+    <p class="text-[11px] text-bad-400">{{ video.ollama_error }}</p>
+  {% endif %}
+</div>

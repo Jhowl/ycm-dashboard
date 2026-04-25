@@ -38,6 +38,9 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str, str | None]]] = {
         ("transcript_text", "TEXT", None),
         ("transcript_error", "TEXT", None),
         ("chapters", "JSON", None),
+        ("ollama_status", "VARCHAR(16)", "'IDLE'"),
+        ("ollama_progress", "JSON", None),
+        ("ollama_error", "TEXT", None),
     ],
     "metadata_drafts": [
         ("chapters", "JSON", None),

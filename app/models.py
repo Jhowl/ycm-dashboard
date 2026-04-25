@@ -83,6 +83,11 @@ class VideoAsset(TimestampMixin, Base):
     transcript_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     chapters: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
 
+    # Ollama generation lifecycle (added v0.3)
+    ollama_status: Mapped[str] = mapped_column(String(16), default="IDLE", nullable=False)
+    ollama_progress: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    ollama_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     folder: Mapped[SeriesFolder] = relationship("SeriesFolder", back_populates="videos")
     drafts: Mapped[list[MetadataDraft]] = relationship(
         "MetadataDraft", back_populates="video", cascade="all, delete-orphan"

@@ -35,7 +35,7 @@ from app.schemas import (
     VideoSettingsPatch,
 )
 from app.services.jobs import collect_jobs
-from app.services.runtime_settings import get_runtime_ai, update_runtime_ai
+from app.services.runtime_settings import apply_runtime_overrides, get_runtime_ai, update_runtime_ai
 from app.services.channel import apply_channel_defaults_patch, get_or_create_channel_defaults
 from app.services.dashboard import build_home_stats
 from app.services.folders import sync_folders_and_videos, update_folder_steam_link
@@ -186,6 +186,7 @@ def get_video(video_id: str, db: Session = Depends(get_db)):
 @router.post("/videos/{video_id}/generate", response_model=VideoGenerateOut)
 def generate_video_metadata(video_id: str, request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
+    settings = apply_runtime_overrides(settings, db)
     try:
         draft = generate_metadata_draft(db, settings, video_id)
     except ValueError as exc:
@@ -347,6 +348,7 @@ def home_stats(db: Session = Depends(get_db)):
 @router.get("/ollama/health", response_model=OllamaHealthOut)
 def ollama_health(request: Request):
     settings = request.app.state.settings
+    settings = apply_runtime_overrides(settings, db)
     result = OllamaClient(settings).health()
     return OllamaHealthOut(
         ok=bool(result.get("ok")),
@@ -360,6 +362,7 @@ def ollama_health(request: Request):
 def ollama_models(request: Request):
     """Auto-discover models installed on the configured Ollama host."""
     settings = request.app.state.settings
+    settings = apply_runtime_overrides(settings, db)
     result = OllamaClient(settings).health()
     return OllamaModelsOut(
         ok=bool(result.get("ok")),

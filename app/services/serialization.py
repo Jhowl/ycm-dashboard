@@ -65,4 +65,7 @@ def video_to_schema(video: VideoAsset) -> VideoOut:
         transcript_error=video.transcript_error,
         chapters=_chapters_to_schema(video.chapters or []),
         latest_draft=draft_to_schema(latest) if latest else None,
+        ollama_status=getattr(video, "ollama_status", None) or "IDLE",
+        ollama_progress=dict(getattr(video, "ollama_progress", None) or {}),
+        ollama_error=getattr(video, "ollama_error", None),
     )

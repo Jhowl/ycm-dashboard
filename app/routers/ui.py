@@ -111,29 +111,40 @@ def config_page(request: Request, db: Session = Depends(get_db)):
 @router.post("/ui/channel-defaults")
 def update_channel_defaults(
     request: Request,
-    channel_name: str = Form(...),
-    language: str = Form(...),
-    default_tags: str = Form(...),
-    pc_config: str = Form(...),
-    default_description_block: str = Form(...),
-    default_visibility: str = Form(...),
+    channel_name: str | None = Form(default=None),
+    language: str | None = Form(default=None),
+    default_tags: str | None = Form(default=None),
+    pc_config: str | None = Form(default=None),
+    default_description_block: str | None = Form(default=None),
+    default_visibility: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ):
+    """Patch channel defaults — only fields actually present in the POST are
+    written. Avoids 422s when the new Settings page submits a subset of fields.
+    """
     settings = request.app.state.settings
     defaults = get_or_create_channel_defaults(db, settings)
     update_channel_defaults_from_form(
         defaults,
-        channel_name=channel_name,
-        language=language,
-        default_tags=default_tags,
-        pc_config=pc_config,
-        default_description_block=default_description_block,
-        default_visibility=default_visibility,
+        channel_name=channel_name if channel_name is not None else defaults.channel_name,
+        language=language if language is not None else defaults.language,
+        default_tags=default_tags if default_tags is not None else ", ".join(defaults.default_tags or []),
+        pc_config=pc_config if pc_config is not None else defaults.pc_config,
+        default_description_block=(
+            default_description_block
+            if default_description_block is not None
+            else defaults.default_description_block
+        ),
+        default_visibility=default_visibility if default_visibility is not None else defaults.default_visibility,
     )
 
     db.commit()
 
-    target = request.headers.get("Referer") or "/config"
+    target = request.headers.get("Referer") or "/settings"
+    # Ensure the toast notice fires on the new Settings page.
+    if "/settings" in target and "notice=" not in target:
+        sep = "&" if "?" in target else "?"
+        target = f"{target}{sep}notice=settings_saved"
     return RedirectResponse(url=target, status_code=303)
 
 

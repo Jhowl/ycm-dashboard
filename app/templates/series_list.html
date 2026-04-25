@@ -40,33 +40,36 @@
       {% endif %}
 
       <!-- Steam recent-games picker -->
+      {% set current_app = f.steam_app_id|int if f.steam_app_id else 0 %}
+      {% set recent_appids = recent_games|map(attribute='appid')|map('int')|list %}
       <form method="post" action="/ui/folders/{{ f.id }}/steam-link"
             class="mt-3 space-y-1.5"
-            x-data="{ pick: '{{ f.steam_app_id or '' }}' }"
-            @submit="
-              const sel = $el.querySelector('select[name=_pick]');
-              const opt = sel.options[sel.selectedIndex];
-              $el.querySelector('input[name=steam_app_id]').value = opt.value || '';
-              $el.querySelector('input[name=steam_game_name]').value = opt.dataset.name || '';
-            ">
+            onsubmit="(function(form){var sel=form.querySelector('select[name=_pick]');var opt=sel.options[sel.selectedIndex]||{};form.querySelector('input[name=steam_app_id]').value=opt.value||'';form.querySelector('input[name=steam_game_name]').value=opt.dataset?opt.dataset.name||'':'';})(this)">
         <label class="block text-[10px] uppercase tracking-wider text-ink-500">Vincular Steam</label>
-        <select name="_pick" x-model="pick"
+        <select name="_pick"
                 class="w-full rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5 text-xs focus:border-accent-500 focus:ring-1 focus:ring-accent-500">
-          <option value="">— nenhum —</option>
-          {% if recent_games %}
-            <optgroup label="Jogados recentemente">
-              {% for g in recent_games %}
-                <option value="{{ g.appid }}" data-name="{{ g.name }}"
-                        {% if f.steam_app_id and g.appid == f.steam_app_id %}selected{% endif %}>
-                  {{ g.name }}{% if g.playtime_2weeks %} · {{ g.playtime_2weeks_label }}{% endif %}
-                </option>
-              {% endfor %}
+          <option value="" {% if not current_app %}selected{% endif %}>— nenhum —</option>
+
+          {# Always pin the currently linked game on top so it's obvious. #}
+          {% if current_app %}
+            <optgroup label="Atual">
+              <option value="{{ current_app }}" data-name="{{ f.steam_game_name or '' }}" selected>
+                {{ f.steam_game_name or 'App ' ~ current_app }} ✓
+              </option>
             </optgroup>
           {% endif %}
-          {% if f.steam_app_id and f.steam_app_id not in (recent_games|map(attribute='appid')|list) %}
-            <option value="{{ f.steam_app_id }}" data-name="{{ f.steam_game_name or '' }}" selected>
-              {{ f.steam_game_name or 'App ' ~ f.steam_app_id }} (atual)
-            </option>
+
+          {% if recent_games %}
+            <optgroup label="Jogados recentemente (Steam)">
+              {% for g in recent_games %}
+                {% set g_app = g.appid|int %}
+                {% if g_app != current_app %}
+                  <option value="{{ g_app }}" data-name="{{ g.name }}">
+                    {{ g.name }}{% if g.playtime_2weeks %} · {{ g.playtime_2weeks_label }}{% endif %}
+                  </option>
+                {% endif %}
+              {% endfor %}
+            </optgroup>
           {% endif %}
         </select>
         <input type="hidden" name="steam_app_id" value="{{ f.steam_app_id or '' }}"/>

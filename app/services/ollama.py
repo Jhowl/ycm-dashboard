@@ -146,13 +146,18 @@ class OllamaClient:
         return str(title).strip()[:100] if title else None
 
     def gen_tags(self, *, game_name: str, default_tags: list[str], per_game_tags: list[str],
-                 transcript_excerpt: str | None) -> list[str] | None:
+                 transcript_excerpt: str | None,
+                 achievements: list[str] | None = None) -> list[str] | None:
         if not self.is_enabled():
             return None
         ctx = (transcript_excerpt or "").strip()[:1000]
+        ach_list = [a for a in (achievements or []) if a]
+        ach_block = ", ".join(ach_list[:10])
         prompt = (
             f"Liste 12 tags em portugues do Brasil para um video de gameplay de {game_name}. "
             "Apenas palavras curtas e frases de 1-3 palavras, sem #, sem virgulas dentro da tag. "
+            "Considere as conquistas desbloqueadas no video como possiveis temas: "
+            f"{ach_block or 'nenhuma'}. "
             f"Tags base: {', '.join(default_tags + per_game_tags)}. "
             f"Trecho do video: {ctx or '(sem transcricao)'}.\n"
             'Responda JSON: {"tags": ["...","..."]}'

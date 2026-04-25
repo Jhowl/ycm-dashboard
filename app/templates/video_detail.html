@@ -271,13 +271,37 @@
                  class="mt-1 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
         </div>
         <div>
-          <label class="block text-xs uppercase tracking-wider text-ink-400">Prompt da thumbnail</label>
+          <label class="block text-xs uppercase tracking-wider text-ink-400">Hint para o LLM</label>
           <textarea name="thumbnail_prompt" rows="3"
+                    placeholder="ex: chefao no laboratorio com pouca vida"
                     class="mt-1 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 focus:border-accent-500 focus:ring-1 focus:ring-accent-500">{{ video.thumbnail_prompt or '' }}</textarea>
+          <p class="mt-1 text-[11px] text-ink-500">Esse texto serve de tema para a IA gerar o prompt final da thumbnail.</p>
         </div>
         <button type="submit" class="w-full rounded-lg bg-ink-800 px-3 py-2 text-sm hover:bg-ink-700">Salvar</button>
       </form>
     </section>
+
+    <!-- AI-generated thumbnail prompt -->
+    {% if latest_draft and latest_draft.thumbnail_prompt %}
+      <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+        <header class="mb-2 flex items-center justify-between">
+          <h2 class="text-sm font-semibold tracking-tight">Prompt da thumbnail (IA)</h2>
+          <button type="button"
+                  onclick="navigator.clipboard.writeText(this.dataset.text); window.showToast('Copiado','ok')"
+                  data-text="{{ latest_draft.thumbnail_prompt }}"
+                  class="rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-[11px] text-ink-300 hover:bg-ink-800">
+            Copiar
+          </button>
+        </header>
+        <pre class="whitespace-pre-wrap rounded-lg bg-ink-950 p-3 text-xs text-ink-200 font-mono leading-relaxed">{{ latest_draft.thumbnail_prompt }}</pre>
+        <p class="mt-2 text-[11px] text-ink-500">Use no Midjourney, ChatGPT/DALL·E ou Stable Diffusion.</p>
+      </section>
+    {% else %}
+      <section class="rounded-xl border border-dashed border-ink-700 bg-ink-900/50 p-5 text-center">
+        <p class="text-sm text-ink-400">Sem prompt da IA ainda.</p>
+        <p class="mt-1 text-[11px] text-ink-500">Clique em <em>Gerar metadata</em> no topo.</p>
+      </section>
+    {% endif %}
 
     <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
       <h2 class="mb-3 text-sm font-semibold tracking-tight">Arquivo</h2>

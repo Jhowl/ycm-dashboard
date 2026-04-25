@@ -167,6 +167,7 @@ class MetadataWorkflowService:
                     default_tags=list(defaults.default_tags or []),
                     per_game_tags=per_game_tags,
                     transcript_excerpt=transcript_text,
+                    achievements=achievements,
                 )
                 if tg:
                     tags_val = tg

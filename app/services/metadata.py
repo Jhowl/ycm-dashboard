@@ -253,6 +253,7 @@ class MetadataWorkflowService:
             thumbnail_prompt=video.thumbnail_prompt,
             used_fallback=content.used_fallback,
             playtime=_playtime_minutes(video),
+            timed_achievements=self._achievement_timed(video),
         )
 
         tags = self._finalize_tags(folder, defaults, content.tags, per_game_tags)
@@ -384,13 +385,30 @@ class MetadataWorkflowService:
         thumbnail_prompt: str | None,
         used_fallback: bool,
         playtime: int | None,
+        timed_achievements: list[tuple[int, str]] | None = None,
     ) -> str:
         base = (base_description or "").strip()
         pieces: list[str] = [base] if base else []
 
+        # YouTube chapters block (00:00 ...).
         chapters_block = format_chapters_for_description(chapters)
         if chapters_block and chapters_block not in base:
             pieces.append(chapters_block)
+
+        # Timed achievements block (MM:SS Name) — appended below the description.
+        # If we have timing data, drop the legacy single-line achievements summary
+        # from base/fallback to avoid duplicate listings.
+        ach_block = format_achievements_with_timing(timed_achievements or [])
+        if ach_block:
+            cleaned: list[str] = []
+            for piece in pieces:
+                lines = [
+                    line for line in piece.splitlines()
+                    if not line.startswith("Conquistas desbloqueadas: ")
+                ]
+                cleaned.append("\n".join(lines).strip())
+            pieces = [p for p in cleaned if p]
+            pieces.append(ach_block)
 
         suffix_lines: list[str] = []
         if playtime is not None:
@@ -452,6 +470,25 @@ class MetadataWorkflowService:
         items = payload.get("achievements_unlocked") or []
         return [str(name) for name in items if name]
 
+    def _achievement_timed(self, video: VideoAsset) -> list[tuple[int, str]]:
+        """Return [(offset_seconds, name), ...] sorted by offset."""
+        payload = video.session_payload or {}
+        items = payload.get("achievements_unlocked_detailed") or []
+        out: list[tuple[int, str]] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            name = str(it.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                offset = int(it.get("offset_seconds") or 0)
+            except (TypeError, ValueError):
+                offset = 0
+            out.append((max(0, offset), name))
+        out.sort(key=lambda x: x[0])
+        return out
+
     def _require_settings(self) -> Settings:
         if self.settings is None:
             raise RuntimeError("Settings are required for this operation")
@@ -503,6 +540,13 @@ class MetadataWorkflowService:
         end_utc = video.recorded_at + timedelta(seconds=max(1, int(video.duration_sec)))
         matched = get_achievements_for_window(settings, int(folder.steam_app_id), start_utc, end_utc)
 
+        # Annotate each achievement with its offset (sec) from the start of the video.
+        start_ts = int(start_utc.timestamp())
+        for item in matched:
+            unlock_ts = int(item.get("unlocktime", 0) or 0)
+            offset = max(0, unlock_ts - start_ts) if unlock_ts else 0
+            item["offset_seconds"] = offset
+
         payload = dict(video.session_payload or {})
         payload["achievements_unlocked"] = [item.get("name") for item in matched if item.get("name")]
         payload["achievements_unlocked_detailed"] = matched
@@ -516,6 +560,26 @@ class MetadataWorkflowService:
             episode_number=episode_number,
             thumbnail_prompt=video.thumbnail_prompt,
         )
+
+
+def format_achievements_with_timing(items: list[tuple[int, str]]) -> str:
+    """Render YouTube-style achievement timeline: 'MM:SS Name' lines."""
+    if not items:
+        return ""
+    lines = ["Conquistas desbloqueadas:"]
+    for offset, name in items:
+        try:
+            sec = int(offset)
+        except (TypeError, ValueError):
+            sec = 0
+        if sec < 0:
+            sec = 0
+        hh = sec // 3600
+        mm = (sec % 3600) // 60
+        ss = sec % 60
+        stamp = f"{hh:02d}:{mm:02d}:{ss:02d}" if hh else f"{mm:02d}:{ss:02d}"
+        lines.append(f"{stamp} {name}")
+    return "\n".join(lines)
 
 
 def _playtime_minutes(video: VideoAsset) -> int | None:

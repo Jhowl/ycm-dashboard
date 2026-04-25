@@ -11,11 +11,14 @@
 {% endblock %}
 
 {% block content %}
+{% if notice == 'series_deletada' %}
+  <div class="mb-4 rounded-lg border border-ok-500/40 bg-ok-500/10 px-4 py-2 text-sm text-ok-400">Series removida.</div>
+{% endif %}
+
 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
   {% for f in folders %}
-    <a href="/series/{{ f.slug }}"
-       class="group flex flex-col rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-card transition hover:border-ink-700 hover:bg-ink-850">
-      <div class="flex items-start justify-between gap-2">
+    <article class="group flex flex-col rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-card transition hover:border-ink-700">
+      <a href="/series/{{ f.slug }}" class="flex items-start justify-between gap-2">
         <span class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500/30 to-brand-500/30 text-sm font-bold">
           {{ f.name[:2]|upper }}
         </span>
@@ -23,14 +26,70 @@
                      {% if f.active %}bg-ok-500/15 text-ok-400{% else %}bg-ink-800 text-ink-500{% endif %}">
           {{ 'ativo' if f.active else 'inativo' }}
         </span>
-      </div>
-      <h3 class="mt-3 text-sm font-semibold tracking-tight truncate">{{ f.name }}</h3>
-      <p class="mt-1 text-[11px] text-ink-400 truncate">{{ f.slug }}</p>
+      </a>
+
+      <a href="/series/{{ f.slug }}" class="block">
+        <h3 class="mt-3 text-sm font-semibold tracking-tight truncate hover:text-accent-400">{{ f.name }}</h3>
+        <p class="mt-1 text-[11px] text-ink-400 truncate">{{ f.slug }}</p>
+      </a>
+
       {% if f.steam_game_name %}
-        <p class="mt-2 inline-flex items-center gap-1 text-[11px] text-brand-400">Steam · {{ f.steam_game_name }}</p>
+        <p class="mt-2 inline-flex items-center gap-1 text-[11px] text-brand-400 truncate">Steam · {{ f.steam_game_name }}</p>
+      {% else %}
+        <p class="mt-2 text-[11px] text-ink-500">Sem vínculo Steam</p>
       {% endif %}
-      <div class="mt-auto pt-3 text-[11px] text-ink-500">{{ f.created_at|ny_datetime if f.created_at else '' }}</div>
-    </a>
+
+      <!-- Steam recent-games picker -->
+      <form method="post" action="/ui/folders/{{ f.id }}/steam-link"
+            class="mt-3 space-y-1.5"
+            x-data="{ pick: '{{ f.steam_app_id or '' }}' }"
+            @submit="
+              const sel = $el.querySelector('select[name=_pick]');
+              const opt = sel.options[sel.selectedIndex];
+              $el.querySelector('input[name=steam_app_id]').value = opt.value || '';
+              $el.querySelector('input[name=steam_game_name]').value = opt.dataset.name || '';
+            ">
+        <label class="block text-[10px] uppercase tracking-wider text-ink-500">Vincular Steam</label>
+        <select name="_pick" x-model="pick"
+                class="w-full rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5 text-xs focus:border-accent-500 focus:ring-1 focus:ring-accent-500">
+          <option value="">— nenhum —</option>
+          {% if recent_games %}
+            <optgroup label="Jogados recentemente">
+              {% for g in recent_games %}
+                <option value="{{ g.appid }}" data-name="{{ g.name }}"
+                        {% if f.steam_app_id and g.appid == f.steam_app_id %}selected{% endif %}>
+                  {{ g.name }}{% if g.playtime_2weeks %} · {{ g.playtime_2weeks_label }}{% endif %}
+                </option>
+              {% endfor %}
+            </optgroup>
+          {% endif %}
+          {% if f.steam_app_id and f.steam_app_id not in (recent_games|map(attribute='appid')|list) %}
+            <option value="{{ f.steam_app_id }}" data-name="{{ f.steam_game_name or '' }}" selected>
+              {{ f.steam_game_name or 'App ' ~ f.steam_app_id }} (atual)
+            </option>
+          {% endif %}
+        </select>
+        <input type="hidden" name="steam_app_id" value="{{ f.steam_app_id or '' }}"/>
+        <input type="hidden" name="steam_game_name" value="{{ f.steam_game_name or '' }}"/>
+        <div class="flex items-center gap-1.5">
+          <button type="submit"
+                  class="flex-1 rounded-md bg-ink-800 px-2 py-1.5 text-[11px] hover:bg-ink-700">
+            Salvar vínculo
+          </button>
+          <button type="button"
+                  hx-post="/ui/folders/{{ f.id }}/delete"
+                  hx-confirm="Deletar a série {{ f.name }}? Os arquivos no disco não serão tocados, apenas o registro no banco."
+                  hx-swap="none"
+                  hx-on::after-request="window.showToast('Series removida','ok'); setTimeout(()=>location.reload(),800)"
+                  title="Deletar series"
+                  class="rounded-md border border-bad-500/40 bg-bad-500/10 px-2 py-1.5 text-[11px] text-bad-400 hover:bg-bad-500/20">
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14Z"/><path d="M10 11v6M14 11v6"/></svg>
+          </button>
+        </div>
+      </form>
+
+      <div class="mt-3 pt-3 border-t border-ink-800 text-[11px] text-ink-500">{{ f.created_at|ny_datetime if f.created_at else '' }}</div>
+    </article>
   {% else %}
     <div class="col-span-full rounded-xl border border-dashed border-ink-700 bg-ink-900/50 p-8 text-center">
       <p class="text-sm text-ink-400">Nenhuma pasta indexada.</p>

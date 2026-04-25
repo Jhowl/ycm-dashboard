@@ -327,3 +327,15 @@ def _normalize_thumbnail_prompt(value: object) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def delete_folder(db: Session, folder_id: str) -> None:
+    """Hard-delete a series folder and all its videos/drafts.
+
+    The video files on disk are NOT touched — only the DB rows.
+    """
+    folder = db.get(SeriesFolder, folder_id)
+    if not folder:
+        raise NotFoundError("Folder not found")
+    db.delete(folder)
+    db.commit()

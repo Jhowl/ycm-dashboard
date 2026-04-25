@@ -202,6 +202,7 @@ def update_folder_steam_link_ui(
     folder_id: str,
     request: Request,
     steam_app_id: str = Form(default=""),
+    steam_game_name: str = Form(default=""),
     db: Session = Depends(get_db),
 ):
     settings = request.app.state.settings
@@ -215,16 +216,26 @@ def update_folder_steam_link_ui(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="steam_app_id invalido") from exc
 
-        steam_games = get_steam_recent_games(settings, count=60)
-        game = next((item for item in steam_games if int(item.get("appid", 0)) == target_app_id), None)
-        target_game_name = game.get("name") if game else f"App {target_app_id}"
+        # Caller may pass the explicit name (recent-games dropdown). If absent,
+        # try to look it up in the recent games cache, then in owned games.
+        target_game_name = steam_game_name.strip() or None
+        if not target_game_name:
+            recent = get_steam_recent_games(settings, count=60)
+            owned = get_steam_owned_games(settings)
+            for pool in (recent, owned):
+                hit = next((g for g in pool if int(g.get("appid", 0) or 0) == target_app_id), None)
+                if hit:
+                    target_game_name = hit.get("name")
+                    break
+            if not target_game_name:
+                target_game_name = f"App {target_app_id}"
 
     try:
         update_folder_steam_link(db, folder_id, target_app_id, target_game_name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return _redirect_back(request, fallback="/folders")
+    return _redirect_back(request, fallback="/series")
 
 
 @router.get("/series/{slug}")
@@ -708,13 +719,25 @@ def save_draft_ui(
 
 @router.get("/series", include_in_schema=False)
 def series_list_page(request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
     folders = db.execute(
         select(SeriesFolder).order_by(SeriesFolder.active.desc(), SeriesFolder.name.asc())
     ).scalars().all()
+
+    # Recent Steam games used by the inline picker on each card.
+    try:
+        recent_games = get_steam_recent_games(settings, count=20)
+    except Exception:
+        recent_games = []
+
     return templates.TemplateResponse(
         name="series_list.html",
         request=request,
-        context={"folders": folders},
+        context={
+            "folders": folders,
+            "recent_games": recent_games,
+            "notice": request.query_params.get("notice"),
+        },
     )
 
 
@@ -839,3 +862,13 @@ def ollama_status_partial(video_id: str, request: Request, db: Session = Depends
         request=request,
         context={"video": video_to_schema(video)},
     )
+
+
+@router.post("/ui/folders/{folder_id}/delete")
+def delete_folder_ui(folder_id: str, request: Request, db: Session = Depends(get_db)):
+    from app.services.folders import delete_folder
+    try:
+        delete_folder(db, folder_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _redirect_back(request, fallback="/series", notice="series_deletada")

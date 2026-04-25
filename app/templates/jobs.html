@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Jobs · YCM{% endblock %}
+{% block heading %}Jobs & Workers{% endblock %}
+
+{% block content %}
+<section class="rounded-xl border border-ink-800 bg-ink-900 shadow-card">
+  <header class="flex items-center justify-between border-b border-ink-800 px-5 py-3">
+    <div>
+      <h2 class="text-sm font-semibold tracking-tight">Atividade do Celery</h2>
+      <p class="text-[11px] text-ink-500">Atualiza a cada 5 segundos.</p>
+    </div>
+    <button hx-get="/ui/partials/jobs-list" hx-target="#jobs-list" hx-swap="innerHTML"
+            class="rounded-lg border border-ink-700 bg-ink-850 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800">
+      Atualizar agora
+    </button>
+  </header>
+  <div id="jobs-list"
+       hx-get="/ui/partials/jobs-list"
+       hx-trigger="load, every 5s"
+       hx-swap="innerHTML"
+       class="p-5">
+    <p class="text-sm text-ink-400">Carregando…</p>
+  </div>
+</section>
+{% endblock %}

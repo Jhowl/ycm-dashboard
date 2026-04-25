@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Settings · YCM{% endblock %}
+{% block heading %}Settings{% endblock %}
+
+{% block content %}
+{% if request.query_params.get('notice') == 'settings_saved' %}
+  <div class="mb-4 rounded-lg border border-ok-500/40 bg-ok-500/10 px-4 py-2 text-sm text-ok-400">Salvo.</div>
+{% endif %}
+
+<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+  <!-- AI block -->
+  <section class="lg:col-span-2 rounded-xl border border-ink-800 bg-ink-900 shadow-card">
+    <header class="border-b border-ink-800 px-5 py-3">
+      <h2 class="text-sm font-semibold tracking-tight">Geração de conteúdo (Ollama + Whisper)</h2>
+      <p class="text-[11px] text-ink-500">Sobrescreve env vars sem redeploy. Salvo no banco.</p>
+    </header>
+    <form method="post" action="/ui/settings/runtime-ai" class="grid grid-cols-1 gap-5 p-5 md:grid-cols-2">
+      <!-- Ollama -->
+      <fieldset class="space-y-3">
+        <legend class="text-xs uppercase tracking-wider text-ink-400">Ollama</legend>
+
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="ollama_enabled" {% if runtime.ollama_enabled %}checked{% endif %}
+                 class="h-4 w-4 rounded border-ink-700 bg-ink-850 text-accent-500 focus:ring-accent-500"/>
+          <span>Ativar Ollama</span>
+          {% if 'ollama_enabled' in runtime.overridden %}<span class="rounded-md bg-brand-500/15 px-1.5 py-0.5 text-[10px] text-brand-400">override</span>{% endif %}
+        </label>
+
+        <div>
+          <label class="text-xs uppercase tracking-wider text-ink-400">Modelo</label>
+          <div class="mt-1 flex items-center gap-2">
+            <input type="text" name="ollama_model" value="{{ runtime.ollama_model }}" list="ollama-models-list"
+                   class="flex-1 rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
+            <button type="button"
+                    hx-get="/ui/partials/ollama-models" hx-target="#ollama-pick" hx-swap="innerHTML"
+                    class="rounded-lg border border-ink-700 bg-ink-850 px-3 py-2 text-xs text-ink-200 hover:bg-ink-800">
+              Atualizar lista
+            </button>
+          </div>
+          <datalist id="ollama-models-list">
+            {% for m in ollama_models %}<option value="{{ m }}"></option>{% endfor %}
+          </datalist>
+          <div id="ollama-pick"
+               hx-get="/ui/partials/ollama-models" hx-trigger="load" hx-swap="innerHTML"
+               class="mt-2"></div>
+          <p class="mt-1 text-[11px] text-ink-500">Host: {{ settings.ollama_base_url }}</p>
+        </div>
+      </fieldset>
+
+      <!-- Whisper -->
+      <fieldset class="space-y-3">
+        <legend class="text-xs uppercase tracking-wider text-ink-400">Whisper</legend>
+
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="whisper_enabled" {% if runtime.whisper_enabled %}checked{% endif %}
+                 class="h-4 w-4 rounded border-ink-700 bg-ink-850 text-accent-500 focus:ring-accent-500"/>
+          <span>Ativar Whisper</span>
+          {% if 'whisper_enabled' in runtime.overridden %}<span class="rounded-md bg-brand-500/15 px-1.5 py-0.5 text-[10px] text-brand-400">override</span>{% endif %}
+        </label>
+
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="whisper_auto_run" {% if runtime.whisper_auto_run %}checked{% endif %}
+                 class="h-4 w-4 rounded border-ink-700 bg-ink-850 text-accent-500 focus:ring-accent-500"/>
+          <span>Encadear metadata após transcrição</span>
+        </label>
+
+        <div>
+          <label class="text-xs uppercase tracking-wider text-ink-400">Modelo Whisper</label>
+          <select name="whisper_model"
+                  class="mt-1 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500">
+            {% for m in ['tiny','base','small','medium','large-v2','large-v3'] %}
+              <option value="{{ m }}" {% if runtime.whisper_model == m %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </fieldset>
+
+      <div class="md:col-span-2 flex items-center justify-between border-t border-ink-800 pt-4">
+        <p class="text-[11px] text-ink-500">
+          Estado: {% if ollama_ok %}<span class="text-ok-400">conectado</span>{% else %}<span class="text-bad-400">offline ({{ ollama_reason or '—' }})</span>{% endif %}
+        </p>
+        <button type="submit" class="rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-white hover:bg-accent-500">
+          Salvar configurações
+        </button>
+      </div>
+    </form>
+  </section>
+
+  <!-- Channel defaults -->
+  <section class="rounded-xl border border-ink-800 bg-ink-900 shadow-card">
+    <header class="border-b border-ink-800 px-5 py-3">
+      <h2 class="text-sm font-semibold tracking-tight">Canal · Defaults</h2>
+    </header>
+    <form method="post" action="/ui/channel-defaults" class="space-y-3 p-5 text-sm">
+      <div>
+        <label class="text-xs uppercase tracking-wider text-ink-400">Nome do canal</label>
+        <input type="text" name="channel_name" value="{{ defaults.channel_name }}"
+               class="mt-1 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
+      </div>
+      <div>
+        <label class="text-xs uppercase tracking-wider text-ink-400">PC config</label>
+        <input type="text" name="pc_config" value="{{ defaults.pc_config }}"
+               class="mt-1 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
+      </div>
+      <div>
+        <label class="text-xs uppercase tracking-wider text-ink-400">Tags padrão (vírgula)</label>
+        <input type="text" name="default_tags" value="{{ defaults.default_tags|join(', ') }}"
+               class="mt-1 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
+      </div>
+      <div>
+        <label class="text-xs uppercase tracking-wider text-ink-400">Bloco fixo de descrição</label>
+        <textarea name="default_description_block" rows="4"
+                  class="mt-1 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 font-mono leading-relaxed focus:border-accent-500 focus:ring-1 focus:ring-accent-500">{{ defaults.default_description_block }}</textarea>
+      </div>
+      <button type="submit" class="w-full rounded-lg bg-ink-800 px-3 py-2 text-sm hover:bg-ink-700">Salvar canal</button>
+    </form>
+  </section>
+</div>
+
+<section class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+  <div class="rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-card text-xs">
+    <h3 class="text-xs uppercase tracking-wider text-ink-400">Caminhos</h3>
+    <dl class="mt-2 space-y-1">
+      <div class="flex justify-between gap-2"><dt class="text-ink-400">video_root</dt><dd class="text-ink-200 font-mono truncate">{{ settings.video_root }}</dd></div>
+      <div class="flex justify-between gap-2"><dt class="text-ink-400">artifacts_root</dt><dd class="text-ink-200 font-mono truncate">{{ settings.artifacts_root }}</dd></div>
+      <div class="flex justify-between gap-2"><dt class="text-ink-400">database_url</dt><dd class="text-ink-200 font-mono truncate">{{ settings.database_url.split('@')[-1] if '@' in settings.database_url else settings.database_url }}</dd></div>
+      <div class="flex justify-between gap-2"><dt class="text-ink-400">redis_url</dt><dd class="text-ink-200 font-mono truncate">{{ settings.redis_url }}</dd></div>
+    </dl>
+  </div>
+  <div class="rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-card text-xs">
+    <h3 class="text-xs uppercase tracking-wider text-ink-400">YouTube OAuth</h3>
+    <p class="mt-2">Token: {% if youtube_token_exists %}<span class="text-ok-400">ok</span> · {{ youtube_token_updated_at }}{% else %}<span class="text-bad-400">ausente</span>{% endif %}</p>
+    <p class="text-ink-400 truncate">redirect: {{ youtube_redirect_uri or '—' }}</p>
+    <p class="text-ink-400 truncate">arquivo: {{ youtube_token_file or '—' }}</p>
+  </div>
+</section>
+{% endblock %}

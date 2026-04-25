@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}{{ video.filename }} · YCM{% endblock %}
+{% block heading %}{{ video.filename }}{% endblock %}
+
+{% block breadcrumbs %}
+<nav class="flex items-center gap-2 text-sm text-ink-400 min-w-0">
+  <a href="/series" class="hover:text-ink-200">Series</a>
+  <span class="text-ink-600">/</span>
+  <a href="/series/{{ folder.slug }}" class="hover:text-ink-200 truncate">{{ folder.name }}</a>
+  <span class="text-ink-600">/</span>
+  <span class="text-ink-100 truncate">Episódio {{ video.series_number or '—' }}</span>
+</nav>
+{% endblock %}
+
+{% block actions %}
+<div class="flex items-center gap-2">
+  <button hx-post="/ui/videos/{{ video.id }}/transcribe"
+          hx-swap="none"
+          hx-on::after-request="window.showToast('Transcrição enfileirada','ok'); setTimeout(()=>location.reload(),1500)"
+          class="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-850 px-3 py-1.5 text-sm text-ink-200 hover:bg-ink-800">
+    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6M5.6 5.6l4.3 4.3M2 12h6M5.6 18.4l4.3-4.3M12 22v-6M18.4 18.4l-4.3-4.3M22 12h-6M18.4 5.6l-4.3 4.3"/></svg>
+    Transcrever
+  </button>
+  <button hx-post="/ui/videos/{{ video.id }}/generate"
+          hx-swap="none"
+          hx-on::after-request="window.showToast('Draft gerado','ok'); setTimeout(()=>location.reload(),1500)"
+          class="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-400">
+    Gerar metadata
+  </button>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+  <!-- LEFT: status + transcript -->
+  <div class="lg:col-span-2 space-y-4">
+
+    <!-- Status timeline -->
+    <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+      <h2 class="mb-3 text-sm font-semibold tracking-tight">Pipeline</h2>
+      {% set stages = [
+        ('Ingerido', video.status != 'INGESTED' or true),
+        ('Transcrito', video.transcript_status == 'READY'),
+        ('Draft pronto', video.status in ['DRAFT_READY','APPROVED','UPLOADED']),
+        ('Aprovado', video.status in ['APPROVED','UPLOADED']),
+        ('Publicado', video.status == 'UPLOADED'),
+      ] %}
+      <ol class="grid grid-cols-5 gap-2 text-center text-[11px]">
+        {% for label, done in stages %}
+          <li class="flex flex-col items-center gap-1">
+            <span class="flex h-6 w-6 items-center justify-center rounded-full
+                         {% if done %}bg-ok-500/20 text-ok-400{% else %}bg-ink-800 text-ink-500{% endif %}">
+              {% if done %}<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
+              {% else %}<span class="h-1.5 w-1.5 rounded-full bg-ink-500"></span>{% endif %}
+            </span>
+            <span class="{% if done %}text-ink-100{% else %}text-ink-500{% endif %}">{{ label }}</span>
+          </li>
+        {% endfor %}
+      </ol>
+      <div class="mt-4 flex items-center gap-2 flex-wrap">
+        {% set tstatus = video.transcript_status or 'PENDING' %}
+        <span id="ts-chip-{{ video.id }}"
+              hx-get="/ui/partials/videos/{{ video.id }}/transcript-status"
+              {% if tstatus in ('PENDING','RUNNING') %}hx-trigger="every 8s"{% endif %}
+              hx-swap="outerHTML"
+              class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]
+                     {% if tstatus == 'READY' %}border-ok-500/40 bg-ok-500/10 text-ok-400
+                     {% elif tstatus == 'RUNNING' %}border-warn-500/40 bg-warn-500/10 text-warn-400
+                     {% elif tstatus == 'FAILED' %}border-bad-500/40 bg-bad-500/10 text-bad-400
+                     {% else %}border-ink-700 bg-ink-850 text-ink-300{% endif %}">
+          Transcrição: {{ tstatus }}{% if video.transcript_language %} ({{ video.transcript_language }}){% endif %}
+        </span>
+        <span class="inline-flex items-center gap-1.5 rounded-full border border-ink-700 bg-ink-850 px-2.5 py-1 text-[11px] text-ink-300">
+          Status: {{ video.status }}
+        </span>
+        {% if video.uploaded_url %}
+          <a href="{{ video.uploaded_url }}" target="_blank"
+             class="inline-flex items-center gap-1.5 rounded-full border border-accent-500/40 bg-accent-500/10 px-2.5 py-1 text-[11px] text-accent-400 hover:bg-accent-500/20">
+            ↗ youtube
+          </a>
+        {% endif %}
+      </div>
+    </section>
+
+    <!-- Transcript viewer -->
+    <section class="rounded-xl border border-ink-800 bg-ink-900 shadow-card overflow-hidden"
+             x-data="{ tab: 'transcript' }">
+      <header class="flex border-b border-ink-800 text-sm">
+        <button @click="tab='transcript'" :class="tab==='transcript' ? 'text-white border-accent-500' : 'text-ink-400 border-transparent hover:text-ink-200'"
+                class="border-b-2 px-5 py-3">Transcrição</button>
+        <button @click="tab='draft'" :class="tab==='draft' ? 'text-white border-accent-500' : 'text-ink-400 border-transparent hover:text-ink-200'"
+                class="border-b-2 px-5 py-3">Draft</button>
+        <button @click="tab='chapters'" :class="tab==='chapters' ? 'text-white border-accent-500' : 'text-ink-400 border-transparent hover:text-ink-200'"
+                class="border-b-2 px-5 py-3">Capítulos</button>
+      </header>
+
+      <div x-show="tab==='transcript'" class="p-5">
+        {% if transcript and transcript.segments %}
+          <div class="max-h-[420px] overflow-y-auto rounded-lg bg-ink-950/60 p-3 text-sm leading-relaxed font-mono">
+            {% for seg in transcript.segments %}
+              {% set s = (seg.start or seg.start_seconds or 0)|int %}
+              <p class="mb-1.5">
+                <span class="text-ink-500 mr-2">[{{ '%02d:%02d'|format(s // 60, s % 60) }}]</span>
+                <span class="text-ink-200">{{ seg.text }}</span>
+              </p>
+            {% endfor %}
+          </div>
+        {% elif video.transcript_error %}
+          <p class="text-sm text-bad-400">Erro na transcrição: {{ video.transcript_error }}</p>
+        {% elif tstatus == 'RUNNING' %}
+          <p class="text-sm text-warn-400">Whisper rodando — atualiza em alguns segundos.</p>
+        {% else %}
+          <p class="text-sm text-ink-400">Nenhuma transcrição ainda. Clique em <em>Transcrever</em> acima.</p>
+        {% endif %}
+      </div>
+
+      <div x-show="tab==='draft'" class="p-5">
+        {% if latest_draft %}
+          <form hx-post="/ui/videos/{{ video.id }}/draft" hx-swap="none"
+                hx-on::after-request="window.showToast('Draft salvo','ok')"
+                class="space-y-3">
+            <label class="block text-xs uppercase tracking-wider text-ink-400">Título PT-BR</label>
+            <input type="text" name="title_ptbr" value="{{ latest_draft.title_ptbr }}"
+                   class="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
+
+            <label class="block text-xs uppercase tracking-wider text-ink-400">Descrição</label>
+            <textarea name="description_ptbr" rows="10"
+                      class="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm font-mono leading-relaxed focus:border-accent-500 focus:ring-1 focus:ring-accent-500">{{ latest_draft.description_ptbr }}</textarea>
+
+            <label class="block text-xs uppercase tracking-wider text-ink-400">Tags (vírgula)</label>
+            <input type="text" name="tags" value="{{ latest_draft.tags|join(', ') }}"
+                   class="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
+
+            <div class="flex gap-2 pt-2">
+              <button type="submit" class="rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-white hover:bg-accent-500">Salvar draft</button>
+              <button type="button"
+                      hx-post="/ui/videos/{{ video.id }}/approve"
+                      hx-swap="none"
+                      hx-on::after-request="setTimeout(()=>location.reload(),1000)"
+                      class="rounded-lg border border-ok-500/40 bg-ok-500/10 px-4 py-2 text-sm font-medium text-ok-400 hover:bg-ok-500/20">Aprovar</button>
+              <button type="button"
+                      hx-post="/ui/videos/{{ video.id }}/upload"
+                      hx-swap="none"
+                      hx-on::after-request="setTimeout(()=>location.reload(),1500)"
+                      class="rounded-lg border border-brand-500/40 bg-brand-500/10 px-4 py-2 text-sm font-medium text-brand-400 hover:bg-brand-500/20">Upload</button>
+            </div>
+            <p class="text-[11px] text-ink-500">{{ latest_draft.model_provider }}/{{ latest_draft.model_name or 'fallback' }} · v{{ latest_draft.version }}</p>
+          </form>
+        {% else %}
+          <p class="text-sm text-ink-400">Sem draft. Clique em <em>Gerar metadata</em>.</p>
+        {% endif %}
+      </div>
+
+      <div x-show="tab==='chapters'" class="p-5">
+        {% set chapters = (latest_draft.chapters if latest_draft else []) or video.chapters or [] %}
+        {% if chapters %}
+          <ol class="space-y-1.5 text-sm font-mono">
+            {% for c in chapters %}
+              <li class="flex items-baseline gap-3">
+                <span class="text-ink-500 tabular-nums w-12">{{ '%02d:%02d'|format(c.start_seconds // 60, c.start_seconds % 60) }}</span>
+                <span>{{ c.title }}</span>
+              </li>
+            {% endfor %}
+          </ol>
+        {% else %}
+          <p class="text-sm text-ink-400">Nenhum capítulo gerado ainda.</p>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+
+  <!-- RIGHT: metadata + thumbnail -->
+  <aside class="space-y-4">
+    <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+      <h2 class="mb-3 text-sm font-semibold tracking-tight">Episódio</h2>
+      <form hx-post="/ui/videos/{{ video.id }}/settings" hx-swap="none"
+            hx-on::after-request="window.showToast('Salvo','ok'); setTimeout(()=>location.reload(),800)"
+            class="space-y-3 text-sm">
+        <div>
+          <label class="block text-xs uppercase tracking-wider text-ink-400">Número da série</label>
+          <input type="number" name="series_number" value="{{ video.series_number or '' }}"
+                 class="mt-1 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wider text-ink-400">Prompt da thumbnail</label>
+          <textarea name="thumbnail_prompt" rows="3"
+                    class="mt-1 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 focus:border-accent-500 focus:ring-1 focus:ring-accent-500">{{ video.thumbnail_prompt or '' }}</textarea>
+        </div>
+        <button type="submit" class="w-full rounded-lg bg-ink-800 px-3 py-2 text-sm hover:bg-ink-700">Salvar</button>
+      </form>
+    </section>
+
+    <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+      <h2 class="mb-3 text-sm font-semibold tracking-tight">Arquivo</h2>
+      <dl class="space-y-1.5 text-xs">
+        <div class="flex justify-between gap-2"><dt class="text-ink-400">Filename</dt><dd class="text-ink-200 truncate text-right">{{ video.filename }}</dd></div>
+        <div class="flex justify-between gap-2"><dt class="text-ink-400">Duração</dt><dd class="text-ink-200">{{ video.duration_sec or '—' }}s</dd></div>
+        <div class="flex justify-between gap-2"><dt class="text-ink-400">Gravado</dt><dd class="text-ink-200">{{ video.recorded_at|ny_datetime if video.recorded_at else '—' }}</dd></div>
+        <div class="flex justify-between gap-2"><dt class="text-ink-400">Pasta</dt><dd class="text-ink-200 truncate text-right">{{ folder.name }}</dd></div>
+      </dl>
+    </section>
+
+    {% if thumb_files %}
+      <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+        <h2 class="mb-3 text-sm font-semibold tracking-tight">Thumbnails</h2>
+        <div class="grid grid-cols-2 gap-2">
+          {% for t in thumb_files %}
+            <img src="{{ t.url }}" alt="thumb" class="aspect-video w-full rounded-md object-cover bg-ink-950"/>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

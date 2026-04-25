@@ -14,4 +14,11 @@ def worker_session(settings: Settings | None = None) -> Iterator[tuple[Settings,
     init_db(engine)
 
     with session_factory() as db:
-        yield app_settings, db
+        # Apply DB-backed overrides (model picker etc.) on top of env settings.
+        try:
+            from app.services.runtime_settings import apply_runtime_overrides
+
+            effective = apply_runtime_overrides(app_settings, db)
+        except Exception:
+            effective = app_settings
+        yield effective, db

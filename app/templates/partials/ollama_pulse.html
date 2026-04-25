@@ -1,0 +1,9 @@
+{% set tone = 'ok' if ok else 'bad' %}
+<span id="ollama-pulse"
+      hx-get="/ui/partials/ollama-pulse"
+      hx-trigger="every 30s"
+      hx-swap="outerHTML"
+      class="hidden md:inline-flex items-center gap-1.5 rounded-full border border-ink-700 bg-ink-850 px-2.5 py-1 text-[11px] text-ink-300">
+  <span class="h-1.5 w-1.5 rounded-full {% if ok %}bg-ok-500{% else %}bg-bad-500{% endif %}"></span>
+  Ollama {{ model }}{% if not ok %} · {{ reason or 'offline' }}{% endif %}
+</span>

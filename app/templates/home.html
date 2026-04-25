@@ -1,160 +1,117 @@
 {% extends "base.html" %}
+{% block title %}Dashboard · YCM{% endblock %}
+{% block heading %}Dashboard{% endblock %}
 
-{% block title %}Home | YouTube Upload Manager{% endblock %}
+{% block actions %}
+<button hx-post="/api/v1/folders/scan"
+        hx-headers='{"Accept":"application/json"}'
+        hx-vals='{}'
+        hx-swap="none"
+        hx-on::after-request="window.showToast('Scan disparado', 'ok'); setTimeout(()=>location.reload(), 1500)"
+        class="inline-flex items-center gap-1.5 rounded-lg bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-400">
+  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+  Scan folders
+</button>
+{% endblock %}
 
 {% block content %}
-<div class="dashboard-grid home-grid">
-  <section class="card hero span-2">
-    <div class="hero-top">
-      <div class="hero-copy">
-        <h1>Home do Canal</h1>
-        <p class="hero-path">Raiz monitorada: <code>{{ video_root }}</code></p>
-      </div>
-      <nav class="hero-links" aria-label="Acesso principal">
-        <a class="button-link subtle" href="/">Home</a>
-        <a class="button-link subtle" href="/folders">Abrir Folders</a>
-        <a class="button-link subtle" href="/config">Abrir Config</a>
-      </nav>
-    </div>
-    <div class="stats-grid">
-      <article>
-        <span>Folders</span>
-        <strong>{{ stats.folders_total }}</strong>
-      </article>
-      <article>
-        <span>Ativos</span>
-        <strong>{{ stats.folders_active }}</strong>
-      </article>
-      <article>
-        <span>Pendentes</span>
-        <strong>{{ stats.pending_drafts }}</strong>
-      </article>
-      <article>
-        <span>Prontos p/ upload</span>
-        <strong>{{ stats.ready_to_upload }}</strong>
-      </article>
-    </div>
-  </section>
-
-  <section class="card compact-card token-card span-2">
-    <div class="token-head">
-      <div>
-        <p class="token-label">YouTube</p>
-        <h2>Status do token</h2>
-      </div>
-      <div class="token-badge-wrap">
-        {% if youtube_token_exists %}
-          <span class="badge ok">encontrado</span>
-        {% else %}
-          <span class="badge muted">nao encontrado</span>
-        {% endif %}
-      </div>
-    </div>
-
-    <div class="token-foot">
-      <div class="token-meta">
-        {% if youtube_token_updated_at %}
-          <p>Atualizado em (New York): <code>{{ youtube_token_updated_at }}</code></p>
-        {% else %}
-          <p class="muted">Token ainda nao foi gerado neste servidor.</p>
-        {% endif %}
-      </div>
-      <a class="button-link" href="/config">Gerenciar token</a>
-    </div>
-  </section>
-
-  <section class="card span-2">
-    <h2>Steam Profile</h2>
-    {% if steam_data.error %}
-      <p class="error-text">{{ steam_data.error }}</p>
-    {% elif steam_data.profile %}
-      <div class="steam-profile">
-        <img src="{{ steam_data.profile.avatarfull }}" alt="Steam avatar" class="steam-avatar" />
-        <div>
-          <h3>{{ steam_data.profile.personaname }}</h3>
-          <p><a href="{{ steam_data.profile.profileurl }}" target="_blank" rel="noreferrer">Abrir perfil Steam</a></p>
-          {% if steam_data.last_updated_label %}
-            <p>Atualizado em (New York): <code>{{ steam_data.last_updated_label }}</code></p>
+<section class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+  {% set cards = [
+    ('Pastas ativas', stats.folders_active, stats.folders_total, 'film', 'accent', '/series'),
+    ('Vídeos no pipeline', stats.videos_total, None, 'play', 'brand', '/series'),
+    ('Drafts pendentes', stats.pending_drafts, None, 'edit', 'warn', '/series?filter=pending'),
+    ('Prontos p/ upload', stats.ready_to_upload, None, 'upload', 'ok', '/series?filter=ready'),
+  ] %}
+  {% for label, value, total, icon, tone, href in cards %}
+    <a href="{{ href }}"
+       class="group relative overflow-hidden rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-card transition hover:border-ink-700 hover:bg-ink-850">
+      <div class="flex items-start justify-between">
+        <span class="text-xs uppercase tracking-wider text-ink-400">{{ label }}</span>
+        <span class="rounded-md bg-{{ tone }}-500/10 p-1.5 text-{{ tone }}-400">
+          {% if icon == 'film' %}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18"/></svg>
+          {% elif icon == 'play' %}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 3 20 12 6 21 6 3" stroke-linejoin="round"/></svg>
+          {% elif icon == 'edit' %}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          {% elif icon == 'upload' %}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
           {% endif %}
-        </div>
+        </span>
       </div>
-
-      <div class="steam-grid">
-        <div class="steam-box">
-          <h3>Ultimos jogos</h3>
-          <ul class="list-scroll">
-            {% for game in steam_data.recent_games %}
-              <li>
-                <strong>{{ game.name }}</strong>
-                <span>2 semanas: {{ game.playtime_2weeks_label }}</span>
-                <span>Total: {{ game.playtime_forever_label }}</span>
-              </li>
-            {% else %}
-              <li>Nenhum jogo recente encontrado.</li>
-            {% endfor %}
-          </ul>
-        </div>
-        <div class="steam-box">
-          <h3>Ultimas conquistas</h3>
-          <ul class="list-scroll">
-            {% for achievement in steam_data.recent_achievements %}
-              <li>
-                <strong>{{ achievement.name }}</strong>
-                <span>{{ achievement.game }}</span>
-                <span>{{ achievement.unlocktime_label }}</span>
-              </li>
-            {% else %}
-              <li>Nenhuma conquista recente encontrada.</li>
-            {% endfor %}
-          </ul>
-        </div>
+      <div class="mt-3 flex items-baseline gap-2">
+        <span class="text-3xl font-semibold tabular-nums">{{ value }}</span>
+        {% if total is not none %}<span class="text-xs text-ink-400">de {{ total }}</span>{% endif %}
       </div>
-    {% else %}
-      <p class="error-text">Steam nao configurado.</p>
-    {% endif %}
-  </section>
+    </a>
+  {% endfor %}
+</section>
 
-  <section class="card span-2">
-    <h2>Todos os folders</h2>
-    <div class="table-wrap compact-table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Nome</th>
-            <th>Slug</th>
-            <th>URL</th>
-            <th>Steam game</th>
-            <th>Videos</th>
-            <th>Status</th>
-            <th>Ultimo scan</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for folder in folders %}
-          <tr>
-            <td>{{ folder.name }}</td>
-            <td><code>{{ folder.slug }}</code></td>
-            <td><a href="{{ folder.series_url }}">{{ folder.series_url }}</a></td>
-            <td>{{ folder.steam_game_name or 'nao vinculado' }}</td>
-            <td>{{ folder.video_count }}</td>
-            <td>
-              {% if folder.active %}
-                <span class="badge ok">ativo</span>
-              {% else %}
-                <span class="badge muted">inativo</span>
-              {% endif %}
-            </td>
-            <td>{{ folder.last_scan_at | ny_datetime }}</td>
-          </tr>
-          {% else %}
-          <tr>
-            <td colspan="7">Nenhum folder encontrado ainda.</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+<section class="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+  <div class="lg:col-span-2 rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+    <div class="flex items-center justify-between">
+      <h2 class="text-sm font-semibold tracking-tight">Transcrições</h2>
+      <a href="/series" class="text-xs text-ink-400 hover:text-ink-200">ver todas →</a>
     </div>
-  </section>
-</div>
+    <div class="mt-4 grid grid-cols-3 gap-3 text-center">
+      <div class="rounded-lg bg-warn-500/10 px-3 py-3">
+        <div class="text-2xl font-semibold text-warn-400 tabular-nums">{{ stats.transcripts_pending }}</div>
+        <div class="text-[11px] uppercase tracking-wider text-ink-400">na fila</div>
+      </div>
+      <div class="rounded-lg bg-ok-500/10 px-3 py-3">
+        <div class="text-2xl font-semibold text-ok-400 tabular-nums">{{ stats.transcripts_ready }}</div>
+        <div class="text-[11px] uppercase tracking-wider text-ink-400">prontas</div>
+      </div>
+      <div class="rounded-lg bg-bad-500/10 px-3 py-3">
+        <div class="text-2xl font-semibold text-bad-400 tabular-nums">{{ stats.transcripts_failed }}</div>
+        <div class="text-[11px] uppercase tracking-wider text-ink-400">falhas</div>
+      </div>
+    </div>
+  </div>
 
+  <div id="jobs-card"
+       hx-get="/ui/partials/jobs-summary"
+       hx-trigger="load, every 10s"
+       hx-swap="innerHTML"
+       class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+    <div class="flex items-center justify-between">
+      <h2 class="text-sm font-semibold tracking-tight">Backend</h2>
+      <a href="/jobs" class="text-xs text-ink-400 hover:text-ink-200">ver tudo →</a>
+    </div>
+    <p class="mt-3 text-xs text-ink-400">Carregando workers…</p>
+  </div>
+</section>
+
+<section class="mt-6 rounded-xl border border-ink-800 bg-ink-900 shadow-card">
+  <header class="flex items-center justify-between border-b border-ink-800 px-5 py-3">
+    <h2 class="text-sm font-semibold tracking-tight">Series recentes</h2>
+    <a href="/series" class="text-xs text-ink-400 hover:text-ink-200">todas →</a>
+  </header>
+  <div class="divide-y divide-ink-800">
+    {% for f in folders[:8] %}
+      <a href="/series/{{ f.slug }}"
+         class="flex items-center gap-4 px-5 py-3 hover:bg-ink-850 transition">
+        <span class="inline-flex h-9 w-9 items-center justify-center rounded-md bg-ink-800 text-xs font-semibold text-ink-200">
+          {{ f.name[:2]|upper }}
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="truncate text-sm font-medium">{{ f.name }}</div>
+          <div class="text-xs text-ink-400 truncate">{{ f.slug }}{% if f.steam_game_name %} · Steam: {{ f.steam_game_name }}{% endif %}</div>
+        </div>
+        <span class="text-[11px] text-ink-500">{{ f.created_at|ny_datetime }}</span>
+      </a>
+    {% else %}
+      <p class="px-5 py-6 text-sm text-ink-400">Nenhuma pasta ainda. Clique em <em class="text-ink-200">Scan folders</em>.</p>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="mt-6 grid gap-3 sm:grid-cols-2">
+  <div class="rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-card">
+    <h3 class="text-xs uppercase tracking-wider text-ink-400">Ollama</h3>
+    <p class="mt-1 text-sm">{{ ollama_model }}</p>
+    <p class="text-[11px] text-ink-500">{{ 'ativado' if ollama_enabled else 'desativado' }}</p>
+  </div>
+  <div class="rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-card">
+    <h3 class="text-xs uppercase tracking-wider text-ink-400">Whisper</h3>
+    <p class="mt-1 text-sm">{{ 'ativo' if whisper_enabled else 'inativo' }}</p>
+    <p class="text-[11px] text-ink-500">YouTube token: {{ 'OK' if youtube_token_exists else 'ausente' }}</p>
+  </div>
+</section>
 {% endblock %}

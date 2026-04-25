@@ -1,7 +1,12 @@
 {%- set status = video.transcript_status or 'PENDING' -%}
-<span class="chip chip-transcript chip-transcript-{{ status|lower }}"
+<span id="ts-chip-{{ video.id }}"
       hx-get="/ui/partials/videos/{{ video.id }}/transcript-status"
       {% if status in ('RUNNING', 'PENDING') %}hx-trigger="every 8s"{% endif %}
-      hx-swap="outerHTML">
+      hx-swap="outerHTML"
+      class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]
+             {% if status == 'READY' %}border-ok-500/40 bg-ok-500/10 text-ok-400
+             {% elif status == 'RUNNING' %}border-warn-500/40 bg-warn-500/10 text-warn-400
+             {% elif status == 'FAILED' %}border-bad-500/40 bg-bad-500/10 text-bad-400
+             {% else %}border-ink-700 bg-ink-850 text-ink-300{% endif %}">
   Transcrição: {{ status }}{% if video.transcript_language %} ({{ video.transcript_language }}){% endif %}
 </span>

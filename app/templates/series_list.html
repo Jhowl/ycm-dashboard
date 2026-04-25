@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Series · YCM{% endblock %}
+{% block heading %}Series{% endblock %}
+
+{% block actions %}
+<button hx-post="/api/v1/folders/scan" hx-vals='{}' hx-headers='{"Accept":"application/json"}' hx-swap="none"
+        hx-on::after-request="window.showToast('Scan disparado','ok'); setTimeout(()=>location.reload(),1500)"
+        class="rounded-lg bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500">
+  Scan folders
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+  {% for f in folders %}
+    <a href="/series/{{ f.slug }}"
+       class="group flex flex-col rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-card transition hover:border-ink-700 hover:bg-ink-850">
+      <div class="flex items-start justify-between gap-2">
+        <span class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500/30 to-brand-500/30 text-sm font-bold">
+          {{ f.name[:2]|upper }}
+        </span>
+        <span class="rounded-md px-1.5 py-0.5 text-[10px] uppercase tracking-wider
+                     {% if f.active %}bg-ok-500/15 text-ok-400{% else %}bg-ink-800 text-ink-500{% endif %}">
+          {{ 'ativo' if f.active else 'inativo' }}
+        </span>
+      </div>
+      <h3 class="mt-3 text-sm font-semibold tracking-tight truncate">{{ f.name }}</h3>
+      <p class="mt-1 text-[11px] text-ink-400 truncate">{{ f.slug }}</p>
+      {% if f.steam_game_name %}
+        <p class="mt-2 inline-flex items-center gap-1 text-[11px] text-brand-400">Steam · {{ f.steam_game_name }}</p>
+      {% endif %}
+      <div class="mt-auto pt-3 text-[11px] text-ink-500">{{ f.created_at|ny_datetime if f.created_at else '' }}</div>
+    </a>
+  {% else %}
+    <div class="col-span-full rounded-xl border border-dashed border-ink-700 bg-ink-900/50 p-8 text-center">
+      <p class="text-sm text-ink-400">Nenhuma pasta indexada.</p>
+      <p class="mt-1 text-[11px] text-ink-500">Configure <code>YCM_VIDEO_ROOT</code> e clique em Scan folders.</p>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% if error %}
+  <div class="rounded-lg border border-bad-500/40 bg-bad-500/10 px-4 py-3 text-sm text-bad-400">
+    Worker offline: {{ error }}
+  </div>
+{% endif %}
+<div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+  {% for kind, label, items, tone in [
+        ('active','Ativos', active, 'accent'),
+        ('reserved','Reservados', reserved, 'warn'),
+        ('scheduled','Agendados', scheduled, 'ink'),
+     ] %}
+    <div class="rounded-lg border border-ink-800 bg-ink-950/40">
+      <header class="flex items-center justify-between border-b border-ink-800 px-3 py-2">
+        <span class="text-xs uppercase tracking-wider text-ink-400">{{ label }}</span>
+        <span class="rounded-md bg-{{ tone }}-500/15 px-1.5 py-0.5 text-[11px] text-{{ tone }}-400 tabular-nums">{{ items|length }}</span>
+      </header>
+      <ul class="divide-y divide-ink-800">
+        {% for j in items %}
+          <li class="px-3 py-2 text-xs">
+            <div class="font-mono text-ink-200 truncate">{{ j.name }}</div>
+            <div class="mt-0.5 flex items-center justify-between text-ink-500">
+              <span class="truncate">{{ j.id[:12] }}</span>
+              <span>{{ j.worker or '' }}</span>
+            </div>
+            {% if j.args %}<div class="mt-0.5 truncate text-ink-400 font-mono">{{ j.args|join(', ') }}</div>{% endif %}
+          </li>
+        {% else %}
+          <li class="px-3 py-3 text-xs text-ink-500">vazio</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+</div>
+<div class="mt-4 flex items-center gap-3 text-[11px] text-ink-500">
+  <span class="inline-flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full {% if workers_online %}bg-ok-500{% else %}bg-bad-500{% endif %}"></span> {{ workers_online }} workers online</span>
+</div>

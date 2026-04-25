@@ -143,8 +143,13 @@ class VideoSettingsPatch(BaseModel):
 class HomeStatsOut(BaseModel):
     folders_total: int
     folders_active: int
+    videos_total: int = 0
     pending_drafts: int
     ready_to_upload: int
+    uploaded: int = 0
+    transcripts_pending: int = 0
+    transcripts_ready: int = 0
+    transcripts_failed: int = 0
 
 
 class ScanRequest(BaseModel):
@@ -193,3 +198,47 @@ class OllamaHealthOut(BaseModel):
 class GenericOut(BaseModel):
     ok: bool
     data: dict[str, Any] | None = None
+
+
+class OllamaModelsOut(BaseModel):
+    ok: bool
+    base_url: str
+    configured_model: str
+    models: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+
+class RuntimeAIOut(BaseModel):
+    ollama_model: str
+    ollama_enabled: bool
+    whisper_model: str
+    whisper_enabled: bool
+    whisper_auto_run: bool
+    overridden: list[str] = Field(default_factory=list)
+
+
+class RuntimeAIPatch(BaseModel):
+    ollama_model: str | None = None
+    ollama_enabled: bool | None = None
+    whisper_model: str | None = None
+    whisper_enabled: bool | None = None
+    whisper_auto_run: bool | None = None
+    # Pass any field name in `clear` to drop that override (revert to env default).
+    clear: list[str] = Field(default_factory=list)
+
+
+class JobItemOut(BaseModel):
+    id: str
+    name: str
+    state: str
+    received_at: str | None = None
+    args: list[Any] = Field(default_factory=list)
+    worker: str | None = None
+
+
+class JobsOut(BaseModel):
+    active: list[JobItemOut] = Field(default_factory=list)
+    reserved: list[JobItemOut] = Field(default_factory=list)
+    scheduled: list[JobItemOut] = Field(default_factory=list)
+    workers_online: int = 0
+    error: str | None = None

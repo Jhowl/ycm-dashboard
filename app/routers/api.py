@@ -16,7 +16,12 @@ from app.schemas import (
     FolderUrlOut,
     HomeStatsOut,
     JobActionOut,
+    JobItemOut,
+    JobsOut,
     OllamaHealthOut,
+    OllamaModelsOut,
+    RuntimeAIOut,
+    RuntimeAIPatch,
     ScanRequest,
     ScanResultOut,
     SeriesDetailOut,
@@ -29,6 +34,8 @@ from app.schemas import (
     VideoOut,
     VideoSettingsPatch,
 )
+from app.services.jobs import collect_jobs
+from app.services.runtime_settings import get_runtime_ai, update_runtime_ai
 from app.services.channel import apply_channel_defaults_patch, get_or_create_channel_defaults
 from app.services.dashboard import build_home_stats
 from app.services.folders import sync_folders_and_videos, update_folder_steam_link
@@ -346,4 +353,71 @@ def ollama_health(request: Request):
         configured_model=result.get("configured_model") or settings.ollama_model,
         models=list(result.get("models") or []),
         reason=result.get("reason"),
+    )
+
+
+@router.get("/ollama/models", response_model=OllamaModelsOut)
+def ollama_models(request: Request):
+    """Auto-discover models installed on the configured Ollama host."""
+    settings = request.app.state.settings
+    result = OllamaClient(settings).health()
+    return OllamaModelsOut(
+        ok=bool(result.get("ok")),
+        base_url=settings.ollama_base_url,
+        configured_model=result.get("configured_model") or settings.ollama_model,
+        models=list(result.get("models") or []),
+        reason=result.get("reason"),
+    )
+
+
+@router.get("/runtime/ai", response_model=RuntimeAIOut)
+def runtime_ai_get(request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    runtime = get_runtime_ai(db, settings)
+    return RuntimeAIOut(
+        ollama_model=runtime.ollama_model,
+        ollama_enabled=runtime.ollama_enabled,
+        whisper_model=runtime.whisper_model,
+        whisper_enabled=runtime.whisper_enabled,
+        whisper_auto_run=runtime.whisper_auto_run,
+        overridden=sorted(runtime.overridden),
+    )
+
+
+@router.patch("/runtime/ai", response_model=RuntimeAIOut)
+def runtime_ai_patch(
+    payload: RuntimeAIPatch, request: Request, db: Session = Depends(get_db)
+):
+    settings = request.app.state.settings
+    kwargs: dict[str, object] = {}
+    for field in ("ollama_model", "ollama_enabled", "whisper_model", "whisper_enabled", "whisper_auto_run"):
+        if field in payload.clear:
+            kwargs[field] = None
+        else:
+            val = getattr(payload, field)
+            if val is not None:
+                kwargs[field] = val
+    update_runtime_ai(db, **kwargs)
+    runtime = get_runtime_ai(db, settings)
+    return RuntimeAIOut(
+        ollama_model=runtime.ollama_model,
+        ollama_enabled=runtime.ollama_enabled,
+        whisper_model=runtime.whisper_model,
+        whisper_enabled=runtime.whisper_enabled,
+        whisper_auto_run=runtime.whisper_auto_run,
+        overridden=sorted(runtime.overridden),
+    )
+
+
+@router.get("/jobs/recent", response_model=JobsOut)
+def jobs_recent():
+    from worker.celery_app import celery_app
+
+    payload = collect_jobs(celery_app)
+    return JobsOut(
+        active=[JobItemOut(**j) for j in payload["active"]],
+        reserved=[JobItemOut(**j) for j in payload["reserved"]],
+        scheduled=[JobItemOut(**j) for j in payload["scheduled"]],
+        workers_online=payload["workers_online"],
+        error=payload["error"],
     )

@@ -1,151 +1,105 @@
 {% extends "base.html" %}
+{% block title %}{{ folder.name }} · YCM{% endblock %}
+{% block heading %}{{ folder.name }}{% endblock %}
 
-{% block title %}Series | {{ folder.name }}{% endblock %}
+{% block breadcrumbs %}
+<nav class="flex items-center gap-2 text-sm text-ink-400 min-w-0">
+  <a href="/series" class="hover:text-ink-200">Series</a>
+  <span class="text-ink-600">/</span>
+  <span class="text-ink-100 truncate">{{ folder.name }}</span>
+</nav>
+{% endblock %}
 
 {% block content %}
-<div class="dashboard-grid">
-  <section class="card header-row span-2">
-    <div>
-      <h1>{{ folder.name }}</h1>
-      <p><code>{{ folder.path }}</code></p>
-      {% if folder.steam_game_name %}
-        <p class="muted">Steam: {{ folder.steam_game_name }} · App {{ folder.steam_app_id }}</p>
-      {% endif %}
+<header class="mb-4 flex items-center justify-between rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+  <div class="min-w-0">
+    <div class="flex items-center gap-3">
+      <span class="inline-flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500/30 to-brand-500/30 text-base font-bold">{{ folder.name[:2]|upper }}</span>
+      <div class="min-w-0">
+        <h1 class="text-lg font-semibold tracking-tight truncate">{{ folder.name }}</h1>
+        <p class="font-mono text-[11px] text-ink-500 truncate">{{ folder.path }}</p>
+        {% if folder.steam_game_name %}
+          <p class="text-[11px] text-brand-400">Steam · {{ folder.steam_game_name }} · App {{ folder.steam_app_id }}</p>
+        {% endif %}
+      </div>
     </div>
-    <span class="badge {{ 'ok' if folder.active else 'muted' }}">{{ 'ativo' if folder.active else 'inativo' }}</span>
-  </section>
+  </div>
+  <span class="rounded-md px-2 py-0.5 text-[11px] uppercase tracking-wider
+               {% if folder.active %}bg-ok-500/15 text-ok-400{% else %}bg-ink-800 text-ink-400{% endif %}">
+    {{ 'ativo' if folder.active else 'inativo' }}
+  </span>
+</header>
 
-  {% if folder.steam_app_id %}
-  <section class="card span-2" id="steam-news-card">
-    <div class="series-head">
-      <h2>Novidades Steam</h2>
-      <button type="button"
-              class="subtle"
-              hx-get="/ui/partials/series/{{ folder.slug }}/news"
-              hx-target="#steam-news-card"
-              hx-swap="outerHTML">
-        Atualizar
-      </button>
-    </div>
-    {% include "partials/steam_news.html" %}
-  </section>
-  {% endif %}
-
-  <section class="card span-2">
-    <div class="series-head">
-      <h2>Vídeos</h2>
-      <span class="muted">{{ videos|length }} itens</span>
-    </div>
-
-    {% if notice %}
-      {% if notice.startswith('erro:') %}
-        <p class="error-text">❌ {{ notice.replace('erro:', '') }}</p>
+<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+  <!-- LEFT: videos list -->
+  <section class="lg:col-span-2 rounded-xl border border-ink-800 bg-ink-900 shadow-card">
+    <header class="flex items-center justify-between border-b border-ink-800 px-5 py-3">
+      <h2 class="text-sm font-semibold tracking-tight">Vídeos</h2>
+      <span class="text-[11px] text-ink-500">{{ videos|length }} itens</span>
+    </header>
+    <ul class="divide-y divide-ink-800">
+      {% for v in videos %}
+        {% set ts = v.transcript_status or 'PENDING' %}
+        <li>
+          <a href="/videos/{{ v.id }}" class="flex items-center gap-4 px-5 py-3 hover:bg-ink-850">
+            <span class="inline-flex h-9 w-12 items-center justify-center rounded bg-ink-800 text-[10px] font-mono text-ink-400">
+              EP{{ '%02d'|format(v.series_number or 0) }}
+            </span>
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-sm font-medium">
+                {% if v.latest_draft and v.latest_draft.title_ptbr %}{{ v.latest_draft.title_ptbr }}{% else %}{{ v.filename }}{% endif %}
+              </div>
+              <div class="mt-0.5 text-[11px] text-ink-500 truncate">{{ v.filename }}</div>
+            </div>
+            <span class="rounded-full border px-2 py-0.5 text-[10px]
+                         {% if ts == 'READY' %}border-ok-500/40 bg-ok-500/10 text-ok-400
+                         {% elif ts == 'RUNNING' %}border-warn-500/40 bg-warn-500/10 text-warn-400
+                         {% elif ts == 'FAILED' %}border-bad-500/40 bg-bad-500/10 text-bad-400
+                         {% else %}border-ink-700 bg-ink-850 text-ink-400{% endif %}">
+              {{ ts }}
+            </span>
+            <span class="rounded-full border border-ink-700 bg-ink-850 px-2 py-0.5 text-[10px] text-ink-300">
+              {{ v.status }}
+            </span>
+          </a>
+        </li>
       {% else %}
-        <p class="ok-text">
-          {% if notice == 'draft_gerado' %}✅ Draft gerado.
-          {% elif notice == 'upload_concluido' %}✅ Upload concluído.
-          {% elif notice.startswith('upload_fila:') %}⏳ Upload em background (task {{ notice.replace('upload_fila:', '') }}).
-          {% elif notice.startswith('transcricao_fila:') %}⏳ Transcrição enfileirada (task {{ notice.replace('transcricao_fila:', '') }}).
-          {% else %}✅ Ação concluída.
-          {% endif %}
-        </p>
-      {% endif %}
+        <li class="px-5 py-6 text-sm text-ink-400">Nenhum vídeo na pasta.</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <!-- RIGHT: steam news + actions -->
+  <aside class="space-y-4">
+    {% if folder.steam_app_id %}
+      <section id="steam-news-card" class="rounded-xl border border-ink-800 bg-ink-900 shadow-card">
+        <header class="flex items-center justify-between border-b border-ink-800 px-5 py-3">
+          <h2 class="text-sm font-semibold tracking-tight">Novidades Steam</h2>
+          <button type="button"
+                  hx-get="/ui/partials/series/{{ folder.slug }}/news"
+                  hx-target="#steam-news-card" hx-swap="outerHTML"
+                  class="rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-[11px] text-ink-300 hover:bg-ink-800">
+            Atualizar
+          </button>
+        </header>
+        <div class="p-5">
+          {% include "partials/steam_news.html" %}
+        </div>
+      </section>
     {% endif %}
 
-    <div class="video-grid">
-      {% for video in videos %}
-        <article class="video-card" id="video-{{ video.id }}">
-          <div class="video-card-top">
-            <h3 title="{{ video.filename }}">
-              <a href="/ui/video-settings/{{ video.id }}" class="video-title-link">
-                EP {{ video.series_number or '?' }} · {{ (video.duration_sec // 60) if video.duration_sec else 'N/A' }} min
-              </a>
-              <small>{{ video.filename }}</small>
-            </h3>
-            <span class="status status-{{ video.status|lower }}">{{ video.status }}</span>
-          </div>
-
-          <div class="video-chips">
-            <span class="chip">EP {{ video.series_number or 'auto' }}</span>
-            <span class="chip">{{ (video.duration_sec // 60) if video.duration_sec else 'N/A' }} min</span>
-            <span class="chip">{{ video.recorded_at | ny_datetime }}</span>
-            <span class="chip">ID {{ video.id[:8] }}</span>
-            {% if video.upload_task_status %}
-              <span class="chip">Upload: {{ video.upload_task_status }}</span>
-            {% endif %}
-            <span class="chip chip-transcript"
-                  hx-get="/ui/partials/videos/{{ video.id }}/transcript-status"
-                  hx-trigger="every 8s [this.textContent.includes('RUNNING') || this.textContent.includes('PENDING')]"
-                  hx-swap="outerHTML">
-              Transcrição: {{ video.transcript_status }}
-            </span>
-          </div>
-
-          <div class="video-actions">
-            <form method="post" action="/ui/videos/{{ video.id }}/generate"><button type="submit">Gerar draft</button></form>
-            <form method="post" action="/ui/videos/{{ video.id }}/transcribe"><button type="submit">Transcrever</button></form>
-            <form method="post" action="/ui/videos/{{ video.id }}/upload"><button type="submit">Upload</button></form>
-            <form method="post" action="/ui/videos/{{ video.id }}/reject"><button type="submit">Rejeitar</button></form>
-            <a class="button-link subtle" href="/ui/video-settings/{{ video.id }}">Video Settings</a>
-            {% if video.uploaded_url %}
-              <a class="button-link subtle" href="{{ video.uploaded_url }}" target="_blank" rel="noreferrer">YouTube</a>
-            {% endif %}
-          </div>
-
-          <details class="compact-details">
-            <summary>Editar</summary>
-            <form method="post" action="/ui/videos/{{ video.id }}/settings" class="video-settings-form">
-              <label>
-                Número da série
-                <input type="number" name="series_number" min="1" value="{{ video.series_number or '' }}" />
-              </label>
-              <input type="hidden" name="thumbnail_prompt" value="{{ video.thumbnail_prompt or '' }}" />
-              <button type="submit">Salvar número</button>
-            </form>
-            <form method="post" action="/ui/videos/{{ video.id }}/settings" class="video-settings-form">
-              <input type="hidden" name="series_number" value="{{ video.series_number or '' }}" />
-              <label>
-                Prompt da thumbnail
-                <textarea name="thumbnail_prompt" rows="3">{{ video.thumbnail_prompt or '' }}</textarea>
-              </label>
-              <button type="submit">Salvar prompt</button>
-            </form>
-          </details>
-
-          {% if video.chapters %}
-            <details class="compact-details">
-              <summary>Capítulos ({{ video.chapters|length }})</summary>
-              <ul class="chapter-list">
-                {% for chapter in video.chapters %}
-                  {% set start = chapter.start_seconds %}
-                  {% set hh = start // 3600 %}
-                  {% set mm = (start % 3600) // 60 %}
-                  {% set ss = start % 60 %}
-                  <li>
-                    <code>{% if hh %}{{ '%02d'|format(hh) }}:{% endif %}{{ '%02d'|format(mm) }}:{{ '%02d'|format(ss) }}</code>
-                    {{ chapter.title }}
-                  </li>
-                {% endfor %}
-              </ul>
-            </details>
-          {% endif %}
-
-          {% if video.latest_draft %}
-            <details class="compact-details">
-              <summary>Ver metadados</summary>
-              <p><strong>Título:</strong> {{ video.latest_draft.title_ptbr }}</p>
-              <p><strong>Tags:</strong> {{ video.latest_draft.tags | join(', ') }}</p>
-              {% if video.latest_draft.model_provider %}
-                <p class="muted">Provider: {{ video.latest_draft.model_provider }}{% if video.latest_draft.model_name %} ({{ video.latest_draft.model_name }}){% endif %}</p>
-              {% endif %}
-              <pre>{{ video.latest_draft.description_ptbr }}</pre>
-            </details>
-          {% endif %}
-        </article>
-      {% else %}
-        <p>Nenhum vídeo encontrado neste folder.</p>
-      {% endfor %}
-    </div>
-  </section>
+    <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+      <h2 class="mb-3 text-sm font-semibold tracking-tight">Steam link</h2>
+      <form hx-post="/ui/folders/{{ folder.id }}/steam-link" hx-swap="none"
+            hx-on::after-request="window.showToast('Steam link salvo','ok'); setTimeout(()=>location.reload(),800)"
+            class="space-y-2 text-sm">
+        <input type="number" name="steam_app_id" placeholder="App ID" value="{{ folder.steam_app_id or '' }}"
+               class="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
+        <input type="text" name="steam_game_name" placeholder="Nome do jogo" value="{{ folder.steam_game_name or '' }}"
+               class="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
+        <button type="submit" class="w-full rounded-lg bg-ink-800 px-3 py-2 text-sm hover:bg-ink-700">Salvar</button>
+      </form>
+    </section>
+  </aside>
 </div>
 {% endblock %}

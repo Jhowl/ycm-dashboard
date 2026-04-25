@@ -1,35 +1,30 @@
-{#- Rendered both inline (as card body) in series.html and as outerHTML swap via HTMX.
-    The surrounding <section id="steam-news-card"> is rendered when included as an outerHTML target. -#}
-{% if include_wrapper is not defined %}{% set include_wrapper = false %}{% endif %}
 {% if include_wrapper %}
-<section class="card span-2" id="steam-news-card">
-  <div class="series-head">
-    <h2>Novidades Steam</h2>
+<section id="steam-news-card" class="rounded-xl border border-ink-800 bg-ink-900 shadow-card">
+  <header class="flex items-center justify-between border-b border-ink-800 px-5 py-3">
+    <h2 class="text-sm font-semibold tracking-tight">Novidades Steam</h2>
     <button type="button"
-            class="subtle"
             hx-get="/ui/partials/series/{{ folder.slug }}/news"
-            hx-target="#steam-news-card"
-            hx-swap="outerHTML">
+            hx-target="#steam-news-card" hx-swap="outerHTML"
+            class="rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-[11px] text-ink-300 hover:bg-ink-800">
       Atualizar
     </button>
-  </div>
+  </header>
+  <div class="p-5">
 {% endif %}
-  {% if steam_news %}
-    <ul class="news-list">
-      {% for item in steam_news %}
-        <li class="news-item">
-          <div class="news-head">
-            <a href="{{ item.url }}" target="_blank" rel="noreferrer">{{ item.title }}</a>
-            {% if item.date_label %}<span class="muted">{{ item.date_label }}</span>{% endif %}
-          </div>
-          {% if item.feedlabel %}<p class="muted">{{ item.feedlabel }}</p>{% endif %}
-          {% if item.contents_snippet %}<p>{{ item.contents_snippet }}</p>{% endif %}
-        </li>
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p class="muted">Sem notícias recentes para este jogo Steam.</p>
-  {% endif %}
+{% if steam_news %}
+  <ul class="space-y-3">
+    {% for item in steam_news[:5] %}
+      <li class="rounded-lg border border-ink-800 bg-ink-950/50 p-3">
+        <a href="{{ item.url }}" target="_blank" rel="noopener" class="text-sm font-medium hover:text-accent-400">{{ item.title }}</a>
+        <p class="mt-0.5 text-[11px] text-ink-500">{{ item.date_label or '' }}{% if item.author %} · {{ item.author }}{% endif %}</p>
+        {% if item.contents_snippet %}<p class="mt-1 text-xs text-ink-300 line-clamp-3">{{ item.contents_snippet }}</p>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="text-sm text-ink-400">Sem novidades recentes.</p>
+{% endif %}
 {% if include_wrapper %}
+  </div>
 </section>
 {% endif %}

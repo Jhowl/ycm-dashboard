@@ -1,0 +1,17 @@
+{% if not ok %}
+  <p class="text-[11px] text-bad-400">Ollama offline: {{ reason or 'sem resposta' }}</p>
+{% elif not models %}
+  <p class="text-[11px] text-ink-500">Nenhum modelo instalado.</p>
+{% else %}
+  <div class="flex flex-wrap gap-1.5">
+    {% for m in models %}
+      <button type="button"
+              onclick="document.querySelector('input[name=ollama_model]').value='{{ m }}'"
+              class="rounded-md border px-2 py-1 text-[11px]
+                     {% if m == current %}border-accent-500/40 bg-accent-500/15 text-accent-300
+                     {% else %}border-ink-700 bg-ink-850 text-ink-300 hover:bg-ink-800{% endif %}">
+        {{ m }}
+      </button>
+    {% endfor %}
+  </div>
+{% endif %}

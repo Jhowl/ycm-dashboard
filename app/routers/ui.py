@@ -593,3 +593,208 @@ def youtube_oauth_callback(
     )
     response.delete_cookie("youtube_oauth_state")
     return response
+
+
+# ================================================================
+# v0.3 — new pages: video detail, jobs, settings, series listing.
+# ================================================================
+from app.models import MetadataDraft  # noqa: E402
+from app.services.jobs import collect_jobs  # noqa: E402
+from app.services.runtime_settings import (  # noqa: E402
+    get_runtime_ai,
+    update_runtime_ai,
+)
+
+
+def _episode_links_for_folder(db: Session, folder: SeriesFolder, current_id: str | None) -> list[dict]:
+    siblings = db.execute(
+        select(VideoAsset)
+        .where(VideoAsset.folder_id == folder.id)
+        .order_by(VideoAsset.series_number.asc(), VideoAsset.created_at.asc())
+    ).scalars().all()
+    links: list[dict] = []
+    for sib in siblings:
+        ep = sib.series_number or 0
+        links.append({
+            "label": f"EP {ep:02d}" if ep else sib.filename,
+            "href": f"/videos/{sib.id}",
+            "active": sib.id == current_id,
+        })
+    return links
+
+
+@router.get("/videos/{video_id}")
+def video_detail_page(video_id: str, request: Request, db: Session = Depends(get_db)):
+    video = db.execute(
+        select(VideoAsset).where(VideoAsset.id == video_id).options(selectinload(VideoAsset.drafts))
+    ).scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    folder = db.get(SeriesFolder, video.folder_id)
+
+    latest = get_latest_draft(video)
+    transcript = load_transcript(video)
+
+    out_dir = thumbnail_lab_dir(video.id)
+    thumb_files: list[dict] = []
+    if out_dir.exists():
+        for p in sorted(out_dir.glob("option_*.jpg"))[:4]:
+            thumb_files.append({"url": f"/ui/video-settings/{video.id}/asset/{p.name}?v={int(p.stat().st_mtime)}"})
+
+    return templates.TemplateResponse(
+        name="video_detail.html",
+        request=request,
+        context={
+            "video": video,
+            "folder": folder,
+            "latest_draft": latest,
+            "transcript": transcript,
+            "thumb_files": thumb_files,
+            "episode_links": _episode_links_for_folder(db, folder, video.id) if folder else [],
+        },
+    )
+
+
+@router.post("/ui/videos/{video_id}/draft")
+def save_draft_ui(
+    video_id: str,
+    request: Request,
+    title_ptbr: str = Form(default=""),
+    description_ptbr: str = Form(default=""),
+    tags: str = Form(default=""),
+    db: Session = Depends(get_db),
+):
+    draft = db.execute(
+        select(MetadataDraft)
+        .where(MetadataDraft.video_id == video_id, MetadataDraft.is_active.is_(True))
+        .order_by(MetadataDraft.version.desc())
+    ).scalars().first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="No active draft")
+
+    draft.title_ptbr = title_ptbr.strip() or draft.title_ptbr
+    draft.description_ptbr = description_ptbr
+    if tags is not None:
+        draft.tags = [t.strip() for t in tags.split(",") if t.strip()]
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/series", include_in_schema=False)
+def series_list_page(request: Request, db: Session = Depends(get_db)):
+    folders = db.execute(
+        select(SeriesFolder).order_by(SeriesFolder.active.desc(), SeriesFolder.name.asc())
+    ).scalars().all()
+    return templates.TemplateResponse(
+        name="series_list.html",
+        request=request,
+        context={"folders": folders},
+    )
+
+
+@router.get("/jobs", include_in_schema=False)
+def jobs_page(request: Request):
+    return templates.TemplateResponse(name="jobs.html", request=request, context={})
+
+
+@router.get("/ui/partials/jobs-summary")
+def jobs_summary_partial(request: Request):
+    payload = collect_jobs(celery_app)
+    return templates.TemplateResponse(
+        name="partials/jobs_summary.html",
+        request=request,
+        context=payload,
+    )
+
+
+@router.get("/ui/partials/jobs-list")
+def jobs_list_partial(request: Request):
+    payload = collect_jobs(celery_app)
+    return templates.TemplateResponse(
+        name="partials/jobs_list.html",
+        request=request,
+        context=payload,
+    )
+
+
+@router.get("/ui/partials/ollama-pulse")
+def ollama_pulse_partial(request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    runtime = get_runtime_ai(db, settings)
+    eff = settings.model_copy(update={"ollama_model": runtime.ollama_model})
+    health = OllamaClient(eff).health()
+    return templates.TemplateResponse(
+        name="partials/ollama_pulse.html",
+        request=request,
+        context={
+            "ok": bool(health.get("ok")),
+            "model": runtime.ollama_model,
+            "reason": health.get("reason"),
+        },
+    )
+
+
+@router.get("/settings", include_in_schema=False)
+def settings_page(request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    runtime = get_runtime_ai(db, settings)
+    defaults = get_or_create_channel_defaults(db, settings)
+    youtube_token_exists, youtube_token_updated_at = get_youtube_token_status(settings.youtube_token_file)
+    eff = settings.model_copy(update={"ollama_model": runtime.ollama_model})
+    health = OllamaClient(eff).health()
+    return templates.TemplateResponse(
+        name="settings.html",
+        request=request,
+        context={
+            "defaults": defaults,
+            "settings": settings,
+            "runtime": runtime,
+            "ollama_models": list(health.get("models") or []),
+            "ollama_ok": bool(health.get("ok")),
+            "ollama_reason": health.get("reason"),
+            "youtube_client_id_configured": bool(settings.youtube_client_id),
+            "youtube_redirect_uri": settings.youtube_redirect_uri,
+            "youtube_token_file": settings.youtube_token_file,
+            "youtube_token_exists": youtube_token_exists,
+            "youtube_token_updated_at": youtube_token_updated_at,
+        },
+    )
+
+
+@router.post("/ui/settings/runtime-ai")
+def settings_update_runtime_ai(
+    request: Request,
+    ollama_model: str = Form(default=""),
+    ollama_enabled: str | None = Form(default=None),
+    whisper_model: str = Form(default=""),
+    whisper_enabled: str | None = Form(default=None),
+    whisper_auto_run: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    update_runtime_ai(
+        db,
+        ollama_model=ollama_model.strip() or None,
+        ollama_enabled=bool(ollama_enabled),
+        whisper_model=whisper_model.strip() or None,
+        whisper_enabled=bool(whisper_enabled),
+        whisper_auto_run=bool(whisper_auto_run),
+    )
+    return _redirect_back(request, fallback="/settings", notice="settings_saved")
+
+
+@router.get("/ui/partials/ollama-models")
+def ollama_models_partial(request: Request, db: Session = Depends(get_db)):
+    settings = request.app.state.settings
+    runtime = get_runtime_ai(db, settings)
+    eff = settings.model_copy(update={"ollama_model": runtime.ollama_model})
+    health = OllamaClient(eff).health()
+    return templates.TemplateResponse(
+        name="partials/ollama_models.html",
+        request=request,
+        context={
+            "ok": bool(health.get("ok")),
+            "models": list(health.get("models") or []),
+            "current": runtime.ollama_model,
+            "reason": health.get("reason"),
+        },
+    )

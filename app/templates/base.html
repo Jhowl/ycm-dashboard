@@ -1,57 +1,164 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{% block title %}YouTube Upload Manager{% endblock %}</title>
+    <title>{% block title %}YCM Dashboard{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              ink: {
+                950: '#06080d',
+                900: '#0a0e16',
+                850: '#0f1421',
+                800: '#141a2a',
+                700: '#1c2336',
+                600: '#2a3450',
+                500: '#3f4a6b',
+                400: '#6b7693',
+                300: '#9aa3bd',
+                200: '#c8cee0',
+                100: '#e7eaf3',
+              },
+              accent: {
+                400: '#60a5fa',
+                500: '#3b82f6',
+                600: '#2563eb',
+              },
+              ok:    { 400: '#34d399', 500: '#10b981' },
+              warn:  { 400: '#fbbf24', 500: '#f59e0b' },
+              bad:   { 400: '#f87171', 500: '#ef4444' },
+              brand: { 400: '#a78bfa', 500: '#8b5cf6' },
+            },
+            fontFamily: {
+              sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+              mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+            },
+            boxShadow: {
+              card: '0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.35)',
+            },
+          },
+        },
+      };
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/static/style.css" />
     <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/alpinejs@3.13.10/dist/cdn.min.js" defer></script>
   </head>
-  <body class="dashboard-body">
+  <body class="min-h-screen bg-ink-950 text-ink-100 font-sans antialiased">
     {% set path = request.url.path %}
-    <div class="desktop-warning">
-      <h2>Desktop mode only</h2>
-      <p>Abra este painel em uma tela desktop (>= 1200px).</p>
-    </div>
+    {% set nav_items = [
+      ('/', 'Dashboard', 'home'),
+      ('/series', 'Series', 'film'),
+      ('/jobs', 'Jobs', 'activity'),
+      ('/settings', 'Settings', 'settings'),
+    ] %}
 
-    <div class="bg-shape bg-shape-a"></div>
-    <div class="bg-shape bg-shape-b"></div>
+    <div class="flex min-h-screen">
+      <aside class="hidden md:flex w-60 shrink-0 flex-col border-r border-ink-800 bg-ink-900/60 backdrop-blur">
+        <div class="px-5 py-5 border-b border-ink-800">
+          <a href="/" class="flex items-center gap-2">
+            <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500 to-brand-500 text-white text-sm font-bold">Y</span>
+            <span class="font-semibold tracking-tight">YCM</span>
+          </a>
+          <p class="mt-1 text-xs text-ink-400">Gameplay pipeline</p>
+        </div>
 
-    <div class="app-shell">
-      <aside class="sidebar">
-        <a href="/" class="brand">YCM Dashboard</a>
-        <p class="sidebar-sub">YouTube gameplay control center</p>
-
-        <nav class="sidebar-nav">
-          <a href="/" class="{% if path == '/' %}active{% endif %}">Home</a>
-          <a href="/config" class="{% if path.startswith('/config') %}active{% endif %}">Config</a>
-          <a href="/folders" class="{% if path.startswith('/folders') %}active{% endif %}">Folders</a>
-          <a href="/cuts" class="{% if path.startswith('/cuts') %}active{% endif %}">Cuts</a>
+        <nav class="flex-1 px-3 py-4 space-y-1">
+          {% for href, label, icon in nav_items %}
+            {% set active = (href == '/' and path == '/') or (href != '/' and path.startswith(href)) %}
+            <a href="{{ href }}"
+               class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition
+                      {% if active %}bg-ink-800 text-white{% else %}text-ink-300 hover:bg-ink-850 hover:text-white{% endif %}">
+              <span class="text-ink-400 group-hover:text-ink-200" data-icon="{{ icon }}">
+                {% if icon == 'home' %}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1V9.5Z"/></svg>
+                {% elif icon == 'film' %}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4"/></svg>
+                {% elif icon == 'activity' %}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                {% elif icon == 'settings' %}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+                {% endif %}
+              </span>
+              {{ label }}
+            </a>
+          {% endfor %}
         </nav>
 
         {% if episode_links %}
-          <div class="sidebar-episodes">
-            <p class="sidebar-sub">Episódios</p>
-            <nav class="sidebar-nav episode-nav">
+          <div class="border-t border-ink-800 px-3 py-4">
+            <p class="px-3 text-[11px] font-medium uppercase tracking-wider text-ink-400">Episódios</p>
+            <nav class="mt-2 space-y-0.5 max-h-72 overflow-y-auto">
               {% for ep in episode_links %}
-                <a href="{{ ep.href }}" class="{% if ep.active %}active{% endif %}">{{ ep.label }}</a>
+                <a href="{{ ep.href }}"
+                   class="block truncate rounded-md px-3 py-1.5 text-xs
+                          {% if ep.active %}bg-ink-800 text-white{% else %}text-ink-400 hover:bg-ink-850 hover:text-ink-100{% endif %}">
+                  {{ ep.label }}
+                </a>
               {% endfor %}
             </nav>
           </div>
         {% endif %}
 
-        <div class="sidebar-foot">
-          <p>Layout: dashboard desktop</p>
-          <p class="muted">HTMX · Ollama · Whisper</p>
+        <div class="border-t border-ink-800 px-5 py-3 text-[11px] text-ink-500">
+          v0.2.0 · HTMX · Tailwind
         </div>
       </aside>
 
-      <main class="workspace">
-        {% block content %}{% endblock %}
+      <main class="flex-1 min-w-0">
+        <header class="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-ink-800 bg-ink-900/80 px-6 py-3 backdrop-blur">
+          <div class="flex items-center gap-3 min-w-0">
+            {% block breadcrumbs %}
+              <h1 class="truncate text-sm font-medium text-ink-200">{% block heading %}Dashboard{% endblock %}</h1>
+            {% endblock %}
+          </div>
+          <div class="flex items-center gap-2">
+            {% block actions %}{% endblock %}
+            <span id="ollama-pulse"
+                  hx-get="/ui/partials/ollama-pulse"
+                  hx-trigger="load, every 30s"
+                  hx-swap="outerHTML"
+                  class="hidden md:inline-flex items-center gap-1.5 rounded-full border border-ink-700 bg-ink-850 px-2.5 py-1 text-[11px] text-ink-300">
+              <span class="h-1.5 w-1.5 rounded-full bg-ink-500"></span> Ollama …
+            </span>
+          </div>
+        </header>
+
+        <div class="px-4 py-6 sm:px-6 lg:px-8">
+          {% block content %}{% endblock %}
+        </div>
       </main>
     </div>
+
+    <div id="toasts" class="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[90vw] flex-col gap-2"></div>
+
+    <script>
+      // Toast helper triggered by HTMX response header `HX-Trigger: showToast` or by JS.
+      window.showToast = function (msg, kind) {
+        const colors = {
+          ok: 'bg-ok-500/15 border-ok-500/40 text-ok-400',
+          err: 'bg-bad-500/15 border-bad-500/40 text-bad-400',
+          info: 'bg-accent-500/15 border-accent-500/40 text-accent-400',
+        };
+        const el = document.createElement('div');
+        el.className = `pointer-events-auto rounded-lg border px-3 py-2 text-sm shadow-card ${colors[kind] || colors.info}`;
+        el.textContent = msg;
+        document.getElementById('toasts').appendChild(el);
+        setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .4s'; }, 3000);
+        setTimeout(() => el.remove(), 3500);
+      };
+      document.body.addEventListener('showToast', (ev) => {
+        const d = ev.detail || {};
+        window.showToast(d.message || 'OK', d.kind || 'info');
+      });
+      document.body.addEventListener('htmx:responseError', (ev) => {
+        window.showToast('Erro: ' + (ev.detail.xhr.statusText || 'falhou'), 'err');
+      });
+    </script>
+    {% block extra_scripts %}{% endblock %}
   </body>
 </html>

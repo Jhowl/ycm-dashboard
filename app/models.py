@@ -123,6 +123,14 @@ class ChannelDefaults(Base):
         nullable=False,
     )
     default_visibility: Mapped[str] = mapped_column(String(32), default="private", nullable=False)
+
+    # Runtime AI overrides (nullable -> fall back to env Settings)
+    ai_ollama_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ai_ollama_enabled: Mapped[bool | None] = mapped_column(Integer, nullable=True)
+    ai_whisper_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ai_whisper_enabled: Mapped[bool | None] = mapped_column(Integer, nullable=True)
+    ai_whisper_auto_run: Mapped[bool | None] = mapped_column(Integer, nullable=True)
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

@@ -1,0 +1,22 @@
+{% if error %}
+  <p class="mt-3 text-xs text-bad-400">Worker offline: {{ error }}</p>
+{% else %}
+  <div class="mt-3 flex items-baseline gap-3">
+    <span class="text-2xl font-semibold tabular-nums">{{ workers_online }}</span>
+    <span class="text-xs text-ink-400">workers</span>
+  </div>
+  <ul class="mt-3 space-y-1 text-xs">
+    <li class="flex items-center justify-between">
+      <span class="text-ink-400">Ativos</span>
+      <span class="rounded-md bg-accent-500/15 px-1.5 py-0.5 text-accent-400 tabular-nums">{{ active|length }}</span>
+    </li>
+    <li class="flex items-center justify-between">
+      <span class="text-ink-400">Reservados</span>
+      <span class="rounded-md bg-warn-500/15 px-1.5 py-0.5 text-warn-400 tabular-nums">{{ reserved|length }}</span>
+    </li>
+    <li class="flex items-center justify-between">
+      <span class="text-ink-400">Agendados</span>
+      <span class="rounded-md bg-ink-800 px-1.5 py-0.5 text-ink-300 tabular-nums">{{ scheduled|length }}</span>
+    </li>
+  </ul>
+{% endif %}

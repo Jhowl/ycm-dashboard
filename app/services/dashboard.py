@@ -25,10 +25,23 @@ def build_home_stats(db: Session) -> dict[str, int]:
         "folders_active": db.execute(
             select(func.count(SeriesFolder.id)).where(SeriesFolder.active.is_(True))
         ).scalar_one(),
+        "videos_total": db.execute(select(func.count(VideoAsset.id))).scalar_one(),
         "pending_drafts": db.execute(
             select(func.count(VideoAsset.id)).where(VideoAsset.status.in_(["INGESTED", "DRAFT_READY"]))
         ).scalar_one(),
         "ready_to_upload": db.execute(
             select(func.count(VideoAsset.id)).where(VideoAsset.status == "APPROVED")
+        ).scalar_one(),
+        "uploaded": db.execute(
+            select(func.count(VideoAsset.id)).where(VideoAsset.status == "UPLOADED")
+        ).scalar_one(),
+        "transcripts_pending": db.execute(
+            select(func.count(VideoAsset.id)).where(VideoAsset.transcript_status.in_(["PENDING", "RUNNING"]))
+        ).scalar_one(),
+        "transcripts_ready": db.execute(
+            select(func.count(VideoAsset.id)).where(VideoAsset.transcript_status == "READY")
+        ).scalar_one(),
+        "transcripts_failed": db.execute(
+            select(func.count(VideoAsset.id)).where(VideoAsset.transcript_status == "FAILED")
         ).scalar_one(),
     }

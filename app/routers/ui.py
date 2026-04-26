@@ -545,24 +545,87 @@ def reject_video_ui(video_id: str, request: Request, db: Session = Depends(get_d
     return _redirect_back(request, notice="video_rejeitado")
 
 
+def _toast_response(message: str, kind: str = "info", status_code: int = 200):
+    """Empty-body response that fires an HTMX `showToast` event."""
+    import json as _json
+    from fastapi.responses import Response
+    return Response(
+        status_code=status_code,
+        headers={
+            "HX-Trigger": _json.dumps({"showToast": {"message": message, "kind": kind}}),
+        },
+    )
+
+
+def _upload_preflight(settings, db: Session, video: VideoAsset) -> str | None:
+    """Return None if upload can proceed, otherwise a human-readable reason."""
+    from pathlib import Path as _Path
+    from app.services.youtube_oauth import validate_token
+
+    if not _Path(video.source_path).exists():
+        return f"Arquivo do video nao encontrado: {video.source_path}"
+    latest = get_latest_draft(video)
+    if latest is None:
+        return "Sem draft. Gere a metadata primeiro."
+    if not (latest.title_ptbr or "").strip():
+        return "Draft sem titulo."
+    if not settings.youtube_client_id or not settings.youtube_client_secret:
+        return "YOUTUBE_CLIENT_ID/SECRET ausentes no .env"
+    if not getattr(settings, "dry_run", False):
+        check = validate_token(settings)
+        if not check.get("ok"):
+            return f"Token YouTube invalido: {check.get('reason')}"
+    return None
+
+
 @router.post("/ui/videos/{video_id}/upload")
 def upload_video_ui(video_id: str, request: Request, db: Session = Depends(get_db)):
+    """One-click upload: auto-approve + preflight + dispatch Celery task.
+
+    Errors are surfaced via HX-Trigger toast so the user sees what went wrong.
+    """
+    settings = request.app.state.settings
+    settings = apply_runtime_overrides(settings, db)
     video = db.get(VideoAsset, video_id)
     if not video:
-        return _redirect_back(request, notice="erro:Video not found")
+        return _toast_response("Video nao encontrado", "err", status_code=404)
+
+    # Auto-approve if not already approved (saves a click).
     if video.status != "APPROVED":
-        return _redirect_back(request, notice="erro:Aprove o video antes do upload")
+        if video.status == "UPLOADED":
+            return _toast_response("Video ja esta marcado como UPLOADED", "info")
+        try:
+            approve_video(db, video_id)
+            video = db.get(VideoAsset, video_id)
+        except ValueError as exc:
+            return _toast_response(f"Falha ao aprovar: {exc}", "err", status_code=400)
 
-    task = upload_video_task.delay(video_id)
-    if task.id:
-        payload = dict(video.session_payload or {})
-        payload["upload_task_id"] = task.id
-        payload["upload_task_status"] = "PENDING"
-        video.session_payload = payload
-        db.commit()
+    # Preflight checks.
+    reason = _upload_preflight(settings, db, video)
+    if reason:
+        return _toast_response(reason, "err", status_code=400)
 
-    short_task = task.id[:8] if task.id else "sem-id"
-    return _redirect_back(request, notice=f"upload_fila:{short_task}")
+    # Dispatch Celery task.
+    try:
+        task = upload_video_task.delay(video_id)
+    except Exception as exc:
+        # Broker unreachable — fall back to synchronous upload.
+        try:
+            from app.services.metadata import upload_video as _sync_upload
+            _sync_upload(db, settings, video_id)
+            return _toast_response("Upload concluido (sincrono)", "ok")
+        except Exception as inner:
+            return _toast_response(f"Upload falhou: {inner}", "err", status_code=500)
+
+    payload = dict(video.session_payload or {})
+    payload["upload_task_id"] = task.id
+    payload["upload_task_status"] = "PENDING"
+    payload["upload_task_error"] = None
+    video.session_payload = payload
+    db.commit()
+
+    short = (task.id or "")[:8]
+    return _toast_response(f"Upload enfileirado ({short})", "ok")
 
 
 @router.get("/ui/youtube/oauth/start")

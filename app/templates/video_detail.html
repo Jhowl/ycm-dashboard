@@ -220,19 +220,33 @@
             <input type="text" name="tags" value="{{ latest_draft.tags|join(', ') }}"
                    class="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500"/>
 
-            <div class="flex gap-2 pt-2">
+            <div class="flex gap-2 pt-2 flex-wrap">
               <button type="submit" class="rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-white hover:bg-accent-500">Salvar draft</button>
               <button type="button"
                       hx-post="/ui/videos/{{ video.id }}/approve"
                       hx-swap="none"
-                      hx-on::after-request="setTimeout(()=>location.reload(),1000)"
+                      hx-on::after-request="window.showToast('Aprovado','ok'); setTimeout(()=>location.reload(),700)"
                       class="rounded-lg border border-ok-500/40 bg-ok-500/10 px-4 py-2 text-sm font-medium text-ok-400 hover:bg-ok-500/20">Aprovar</button>
               <button type="button"
                       hx-post="/ui/videos/{{ video.id }}/upload"
                       hx-swap="none"
-                      hx-on::after-request="setTimeout(()=>location.reload(),1500)"
-                      class="rounded-lg border border-brand-500/40 bg-brand-500/10 px-4 py-2 text-sm font-medium text-brand-400 hover:bg-brand-500/20">Upload</button>
+                      hx-on::after-request="setTimeout(()=>location.reload(),2200)"
+                      hx-disabled-elt="this"
+                      class="rounded-lg border border-brand-500/40 bg-brand-500/10 px-4 py-2 text-sm font-medium text-brand-400 hover:bg-brand-500/20 disabled:opacity-50">
+                Aprovar e enviar ao YouTube
+              </button>
             </div>
+            {% set up_status = (video.session_payload or {}).get('upload_task_status') or '' %}
+            {% if up_status %}
+              <p class="mt-1 text-[11px]
+                 {% if up_status == 'SUCCESS' %}text-ok-400
+                 {% elif up_status == 'FAILURE' %}text-bad-400
+                 {% else %}text-warn-400{% endif %}">
+                Upload: {{ up_status }}
+                {% set up_err = (video.session_payload or {}).get('upload_task_error') %}
+                {% if up_err %} — {{ up_err }}{% endif %}
+              </p>
+            {% endif %}
             <p class="text-[11px] text-ink-500">{{ latest_draft.model_provider }}/{{ latest_draft.model_name or 'fallback' }} · v{{ latest_draft.version }}</p>
           </form>
         {% else %}

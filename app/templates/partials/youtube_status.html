@@ -1,0 +1,66 @@
+{% set ok = result.ok %}
+{% set channel = result.channel or {} %}
+<div id="yt-status"
+     class="space-y-3">
+  <div class="flex items-center justify-between gap-2">
+    <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]
+                 {% if ok %}border-ok-500/40 bg-ok-500/10 text-ok-400
+                 {% elif not exists %}border-ink-700 bg-ink-850 text-ink-300
+                 {% else %}border-bad-500/40 bg-bad-500/10 text-bad-400{% endif %}">
+      {% if ok %}<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>{% endif %}
+      {% if ok %}Token válido
+      {% elif not exists %}Sem token
+      {% else %}Inválido: {{ result.reason }}{% endif %}
+    </span>
+    <button type="button"
+            hx-get="/ui/partials/youtube/status"
+            hx-target="#yt-status"
+            hx-swap="outerHTML"
+            class="rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-[11px] text-ink-300 hover:bg-ink-800">
+      Testar agora
+    </button>
+  </div>
+
+  {% if channel.title %}
+    <p class="text-xs text-ink-300">Canal: <span class="text-ink-100 font-medium">{{ channel.title }}</span>{% if channel.custom_url %} · {{ channel.custom_url }}{% endif %}</p>
+  {% endif %}
+
+  <dl class="space-y-1 text-[11px]">
+    <div class="flex justify-between gap-2"><dt class="text-ink-400">Client ID</dt><dd class="{% if client_id_configured %}text-ok-400{% else %}text-bad-400{% endif %}">{{ 'configurado' if client_id_configured else 'ausente' }}</dd></div>
+    <div class="flex justify-between gap-2"><dt class="text-ink-400">Client secret</dt><dd class="{% if client_secret_configured %}text-ok-400{% else %}text-bad-400{% endif %}">{{ 'configurado' if client_secret_configured else 'ausente' }}</dd></div>
+    <div class="flex justify-between gap-2"><dt class="text-ink-400">Redirect URI</dt><dd class="text-ink-200 font-mono truncate">{{ redirect_uri or '—' }}</dd></div>
+    <div class="flex justify-between gap-2"><dt class="text-ink-400">Token file</dt><dd class="text-ink-200 font-mono truncate">{{ token_path }}</dd></div>
+    {% if exists %}
+      <div class="flex justify-between gap-2"><dt class="text-ink-400">Atualizado</dt><dd class="text-ink-200">{{ updated_at or '—' }}</dd></div>
+    {% endif %}
+    {% if result.scopes %}
+      <div class="flex justify-between gap-2"><dt class="text-ink-400">Escopos</dt><dd class="text-ink-200 truncate">{{ result.scopes|join(' ') }}</dd></div>
+    {% endif %}
+    {% if result.expires_in %}
+      <div class="flex justify-between gap-2"><dt class="text-ink-400">Expira em</dt><dd class="text-ink-200">{{ result.expires_in }}s</dd></div>
+    {% endif %}
+  </dl>
+
+  <div class="flex flex-wrap gap-2 pt-1">
+    <a href="/ui/youtube/oauth/start"
+       class="inline-flex items-center gap-1.5 rounded-lg bg-accent-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-500
+              {% if not client_id_configured or not client_secret_configured %}pointer-events-none opacity-50{% endif %}">
+      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7" stroke-linejoin="round"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+      {% if exists %}Renovar OAuth{% else %}Conectar YouTube{% endif %}
+    </a>
+    {% if exists %}
+      <button type="button"
+              hx-post="/ui/youtube/token/clear"
+              hx-confirm="Remover o token salvo do YouTube? Você precisará reconectar para fazer uploads."
+              hx-swap="none"
+              hx-on::after-request="window.showToast('Token removido','ok'); setTimeout(()=>htmx.ajax('GET','/ui/partials/youtube/status',{target:'#yt-status',swap:'outerHTML'}), 400)"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-bad-500/40 bg-bad-500/10 px-3 py-1.5 text-xs text-bad-400 hover:bg-bad-500/20">
+        Limpar token
+      </button>
+    {% endif %}
+  </div>
+
+  {% if not client_id_configured or not client_secret_configured %}
+    <p class="text-[11px] text-warn-400">Configure <code>YOUTUBE_CLIENT_ID</code> e <code>YOUTUBE_CLIENT_SECRET</code> no .env antes de conectar.</p>
+  {% endif %}
+</div>

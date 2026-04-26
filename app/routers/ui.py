@@ -883,3 +883,41 @@ def delete_folder_ui(folder_id: str, request: Request, db: Session = Depends(get
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _redirect_back(request, fallback="/series", notice="series_deletada")
+
+
+@router.get("/ui/partials/youtube/status")
+def youtube_status_partial(request: Request):
+    """Live token status panel — used on the Settings page."""
+    from app.services.youtube_oauth import validate_token
+
+    settings = request.app.state.settings
+    token_exists, token_updated_at = get_youtube_token_status(settings.youtube_token_file)
+    if not token_exists:
+        result = {"ok": False, "reason": "missing", "channel": None}
+    else:
+        result = validate_token(settings)
+    return templates.TemplateResponse(
+        name="partials/youtube_status.html",
+        request=request,
+        context={
+            "exists": token_exists,
+            "updated_at": token_updated_at,
+            "result": result,
+            "client_id_configured": bool(settings.youtube_client_id),
+            "client_secret_configured": bool(settings.youtube_client_secret),
+            "redirect_uri": settings.youtube_redirect_uri,
+            "token_path": settings.youtube_token_file,
+        },
+    )
+
+
+@router.post("/ui/youtube/token/clear")
+def youtube_token_clear_ui(request: Request):
+    from app.services.youtube_oauth import clear_token
+    settings = request.app.state.settings
+    removed = clear_token(settings)
+    return _redirect_back(
+        request,
+        fallback="/settings",
+        notice="youtube_cleared" if removed else "youtube_no_token",
+    )

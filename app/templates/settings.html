@@ -3,8 +3,13 @@
 {% block heading %}Settings{% endblock %}
 
 {% block content %}
-{% if request.query_params.get('notice') == 'settings_saved' %}
+{% set notice = request.query_params.get('notice') %}
+{% if notice == 'settings_saved' %}
   <div class="mb-4 rounded-lg border border-ok-500/40 bg-ok-500/10 px-4 py-2 text-sm text-ok-400">Salvo.</div>
+{% elif notice == 'youtube_cleared' %}
+  <div class="mb-4 rounded-lg border border-ok-500/40 bg-ok-500/10 px-4 py-2 text-sm text-ok-400">Token do YouTube removido.</div>
+{% elif notice == 'youtube_no_token' %}
+  <div class="mb-4 rounded-lg border border-warn-500/40 bg-warn-500/10 px-4 py-2 text-sm text-warn-400">Não havia token salvo.</div>
 {% endif %}
 
 <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -127,11 +132,11 @@
       <div class="flex justify-between gap-2"><dt class="text-ink-400">redis_url</dt><dd class="text-ink-200 font-mono truncate">{{ settings.redis_url }}</dd></div>
     </dl>
   </div>
-  <div class="rounded-xl border border-ink-800 bg-ink-900 p-4 shadow-card text-xs">
-    <h3 class="text-xs uppercase tracking-wider text-ink-400">YouTube OAuth</h3>
-    <p class="mt-2">Token: {% if youtube_token_exists %}<span class="text-ok-400">ok</span> · {{ youtube_token_updated_at }}{% else %}<span class="text-bad-400">ausente</span>{% endif %}</p>
-    <p class="text-ink-400 truncate">redirect: {{ youtube_redirect_uri or '—' }}</p>
-    <p class="text-ink-400 truncate">arquivo: {{ youtube_token_file or '—' }}</p>
+  <div class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+    <h3 class="mb-3 text-sm font-semibold tracking-tight">YouTube OAuth</h3>
+    <div hx-get="/ui/partials/youtube/status" hx-trigger="load" hx-swap="outerHTML">
+      <p class="text-xs text-ink-400">Carregando…</p>
+    </div>
   </div>
 </section>
 {% endblock %}

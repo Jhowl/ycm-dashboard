@@ -7,6 +7,7 @@ from app.services.folders import sync_folders_and_videos
 from app.services.metadata import generate_metadata_draft, upload_video
 from app.services.thumbnail_lab import ensure_thumbnail_lab_assets
 from app.services.transcription import transcribe_video
+from app.services.video_trim import trim_clips_for_video
 from worker.celery_app import celery_app
 from worker.runtime import worker_session
 
@@ -80,6 +81,29 @@ def transcribe_video_task(self, video_id: str) -> dict:
         "language": result.language,
         "segments": len(result.segments),
         "transcript_path": result.transcript_path,
+    }
+
+
+@celery_app.task(name="tasks.trim_achievement_clips")
+def trim_achievement_clips_task(
+    video_id: str, pre_seconds: int = 15, post_seconds: int = 15
+) -> dict:
+    with worker_session() as (settings, db):
+        clips = trim_clips_for_video(
+            db,
+            settings,
+            video_id,
+            pre_seconds=pre_seconds,
+            post_seconds=post_seconds,
+        )
+
+    logger.info(
+        "Achievement clips trimmed for video=%s count=%d", video_id, len(clips)
+    )
+    return {
+        "video_id": video_id,
+        "count": len(clips),
+        "files": [c.filename for c in clips],
     }
 
 

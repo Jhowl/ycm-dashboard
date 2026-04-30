@@ -90,6 +90,16 @@
           class="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-400">
     Gerar metadata
   </button>
+  {% if achievements_unlocked_detailed %}
+  <button hx-post="/ui/videos/{{ video.id }}/trim-achievements"
+          hx-swap="none"
+          hx-disabled-elt="this"
+          class="inline-flex items-center gap-1.5 rounded-lg border border-accent-500/40 bg-accent-500/10 px-3 py-1.5 text-sm font-medium text-accent-400 hover:bg-accent-500/20 disabled:opacity-50"
+          title="Gera cortes curtos em volta de cada conquista e cria título/descrição/tags com SEO.">
+    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l12 16M18 4L6 20M4 7a3 3 0 1 0 6 0 3 3 0 0 0-6 0zM4 17a3 3 0 1 0 6 0 3 3 0 0 0-6 0z"/></svg>
+    Cortar conquistas ({{ achievements_unlocked_detailed|length }})
+  </button>
+  {% endif %}
 </div>
 <div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
 <script>

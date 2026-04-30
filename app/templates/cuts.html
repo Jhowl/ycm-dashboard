@@ -13,19 +13,54 @@
   <section class="card span-2">
     <div class="video-list">
       {% for c in cuts %}
+        {% set m = c.meta or {} %}
         <article class="video-item">
           <header>
-            <h3>{{ c.name }}</h3>
+            <h3>{{ m.title or c.name }}</h3>
             <span class="status">{{ c.size_mb }} MB</span>
           </header>
-          <p class="muted">modificado: {{ c.mtime }}</p>
+          {% if m.game or m.achievement_name %}
+            <p class="muted">
+              {% if m.game %}<strong>{{ m.game }}</strong>{% endif %}
+              {% if m.achievement_name %} · 🏆 {{ m.achievement_name }}{% endif %}
+              {% if m.offset_seconds is defined %} · @{{ '%02d:%02d:%02d'|format(m.offset_seconds // 3600, (m.offset_seconds % 3600) // 60, m.offset_seconds % 60) }}{% endif %}
+            </p>
+          {% endif %}
+          <p class="muted">arquivo: {{ c.name }} · modificado: {{ c.mtime }}</p>
+
+          {% if m.description %}
+            <details>
+              <summary>Descrição</summary>
+              <pre style="white-space: pre-wrap; font-family: inherit;">{{ m.description }}</pre>
+            </details>
+          {% endif %}
+
+          {% if m.tags %}
+            <p class="muted"><strong>Tags:</strong> {{ m.tags|join(', ') }}</p>
+          {% endif %}
+
           <div class="video-actions">
             <a class="button-link subtle" href="/ui/cuts/file/{{ c.name }}" target="_blank" rel="noreferrer">Abrir</a>
             <a class="button-link subtle" href="/ui/cuts/file/{{ c.name }}?download=1">Download</a>
+            {% if m.title %}
+              <button type="button" class="button-link subtle"
+                      onclick="navigator.clipboard.writeText(this.dataset.text); window.showToast && window.showToast('Título copiado','ok')"
+                      data-text="{{ m.title }}">Copiar título</button>
+            {% endif %}
+            {% if m.description %}
+              <button type="button" class="button-link subtle"
+                      onclick="navigator.clipboard.writeText(this.dataset.text); window.showToast && window.showToast('Descrição copiada','ok')"
+                      data-text="{{ m.description }}">Copiar descrição</button>
+            {% endif %}
+            {% if m.tags %}
+              <button type="button" class="button-link subtle"
+                      onclick="navigator.clipboard.writeText(this.dataset.text); window.showToast && window.showToast('Tags copiadas','ok')"
+                      data-text="{{ m.tags|join(', ') }}">Copiar tags</button>
+            {% endif %}
           </div>
         </article>
       {% else %}
-        <p class="muted">Nenhum corte encontrado ainda.</p>
+        <p class="muted">Nenhum corte encontrado ainda. Vá para o detalhe de um vídeo com conquistas e clique em <em>Cortar conquistas</em>.</p>
       {% endfor %}
     </div>
   </section>

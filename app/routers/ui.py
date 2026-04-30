@@ -41,7 +41,11 @@ from app.services.youtube_oauth import (
     save_token_payload,
 )
 from app.time_utils import format_datetime_ny
-from worker.tasks import upload_video_task, generate_thumbnail_options_task
+from worker.tasks import (
+    upload_video_task,
+    generate_thumbnail_options_task,
+    trim_achievement_clips_task,
+)
 from worker.celery_app import celery_app
 
 router = APIRouter(include_in_schema=False)
@@ -413,21 +417,55 @@ def video_settings_generate_images(video_id: str, request: Request, db: Session 
 @router.get("/cuts")
 def cuts_page(request: Request):
     settings = request.app.state.settings
+    from app.services.video_trim import list_clip_metadata
+
     cuts_dir = Path(settings.cuts_root)
-    items = []
-    if cuts_dir.exists():
-        for p in sorted(cuts_dir.glob('*.mp4'), key=lambda x: x.stat().st_mtime, reverse=True):
-            st = p.stat()
-            items.append({
-                'name': p.name,
-                'size_mb': round(st.st_size / (1024 * 1024), 2),
-                'mtime': format_datetime_ny(datetime.fromtimestamp(st.st_mtime, timezone.utc)),
-            })
+    raw_items = list_clip_metadata(cuts_dir)
+    items = [
+        {
+            **it,
+            "mtime": format_datetime_ny(datetime.fromtimestamp(it["mtime"], timezone.utc)),
+        }
+        for it in raw_items
+    ]
     return templates.TemplateResponse(
         name='cuts.html',
         request=request,
         context={'cuts': items, 'cuts_dir': str(cuts_dir)},
     )
+
+
+@router.post("/ui/videos/{video_id}/trim-achievements")
+def trim_achievement_clips_ui(video_id: str, request: Request, db: Session = Depends(get_db)):
+    """Enqueue per-achievement clip extraction + SEO content generation."""
+    video = db.get(VideoAsset, video_id)
+    if not video:
+        return _toast_response("Video nao encontrado", "err", status_code=404)
+
+    payload = video.session_payload or {}
+    detailed = payload.get("achievements_unlocked_detailed") or []
+    if not detailed:
+        return _toast_response(
+            "Nenhuma conquista com timestamp encontrada para este video.", "err", status_code=400
+        )
+
+    try:
+        task = trim_achievement_clips_task.delay(video_id)
+    except Exception as exc:  # broker unreachable — run inline
+        try:
+            settings = request.app.state.settings
+            settings = apply_runtime_overrides(settings, db)
+            from app.services.video_trim import trim_clips_for_video
+
+            clips = trim_clips_for_video(db, settings, video_id)
+            return _toast_response(
+                f"Cortes gerados (sincrono): {len(clips)}", "ok"
+            )
+        except Exception as inner:
+            return _toast_response(f"Falha ao cortar: {inner}", "err", status_code=500)
+
+    short = (task.id or "")[:8]
+    return _toast_response(f"Cortes enfileirados ({short})", "ok")
 
 
 @router.get('/ui/cuts/file/{filename}')

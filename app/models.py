@@ -114,6 +114,25 @@ class MetadataDraft(TimestampMixin, Base):
     video: Mapped[VideoAsset] = relationship("VideoAsset", back_populates="drafts")
 
 
+class JobRun(Base):
+    """Persisted Celery task run, used by the /jobs page to surface history+errors."""
+
+    __tablename__ = "job_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    args_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="PENDING", nullable=False, index=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ChannelDefaults(Base):
     __tablename__ = "channel_defaults"
 

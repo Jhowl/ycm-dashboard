@@ -415,24 +415,48 @@ def video_settings_generate_images(video_id: str, request: Request, db: Session 
 
 
 @router.get("/cuts")
-def cuts_page(request: Request):
-    settings = request.app.state.settings
+def cuts_page(request: Request, db: Session = Depends(get_db)):
+    """Aggregate clips from every series folder's ``cut/`` subdirectory."""
     from app.services.video_trim import list_clip_metadata
 
-    cuts_dir = Path(settings.cuts_root)
-    raw_items = list_clip_metadata(cuts_dir)
-    items = [
-        {
-            **it,
-            "mtime": format_datetime_ny(datetime.fromtimestamp(it["mtime"], timezone.utc)),
-        }
-        for it in raw_items
-    ]
+    folders = db.execute(select(SeriesFolder).order_by(SeriesFolder.name.asc())).scalars().all()
+    items: list[dict] = []
+    cut_dirs: list[str] = []
+    for folder in folders:
+        cut_dir = Path(folder.path) / "cut"
+        if not cut_dir.exists():
+            continue
+        cut_dirs.append(str(cut_dir))
+        for raw in list_clip_metadata(cut_dir):
+            items.append({
+                **raw,
+                "folder_slug": folder.slug,
+                "folder_name": folder.name,
+                "download_url": f"/ui/cuts/series/{folder.slug}/{raw['name']}",
+                "mtime": format_datetime_ny(datetime.fromtimestamp(raw["mtime"], timezone.utc)),
+            })
+
+    items.sort(key=lambda it: it.get("mtime") or "", reverse=True)
     return templates.TemplateResponse(
         name='cuts.html',
         request=request,
-        context={'cuts': items, 'cuts_dir': str(cuts_dir)},
+        context={'cuts': items, 'cuts_dir': ", ".join(cut_dirs) or "(nenhuma pasta /cut criada ainda)"},
     )
+
+
+@router.get("/ui/cuts/series/{folder_slug}/{filename}")
+def cuts_folder_file(folder_slug: str, filename: str, download: int = 0, db: Session = Depends(get_db)):
+    folder = db.execute(
+        select(SeriesFolder).where(SeriesFolder.slug == folder_slug)
+    ).scalar_one_or_none()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+
+    safe_name = Path(filename).name
+    path = Path(folder.path) / "cut" / safe_name
+    if not path.exists() or path.suffix.lower() != ".mp4":
+        raise HTTPException(status_code=404, detail="Clip not found")
+    return FileResponse(path, filename=safe_name if download else None)
 
 
 @router.post("/ui/videos/{video_id}/trim-achievements")
@@ -451,6 +475,18 @@ def trim_achievement_clips_ui(video_id: str, request: Request, db: Session = Dep
 
     try:
         task = trim_achievement_clips_task.delay(video_id)
+        try:
+            from app.services.job_log import record_run
+
+            record_run(
+                db,
+                task_id=task.id,
+                name="tasks.trim_achievement_clips",
+                args=[video_id],
+                status="PENDING",
+            )
+        except Exception:
+            pass
     except Exception as exc:  # broker unreachable — run inline
         try:
             settings = request.app.state.settings
@@ -875,6 +911,18 @@ def jobs_list_partial(request: Request):
         name="partials/jobs_list.html",
         request=request,
         context=payload,
+    )
+
+
+@router.get("/ui/partials/jobs-history")
+def jobs_history_partial(request: Request, db: Session = Depends(get_db)):
+    from app.services.job_log import recent_runs
+
+    runs = recent_runs(db, limit=40)
+    return templates.TemplateResponse(
+        name="partials/jobs_history.html",
+        request=request,
+        context={"runs": runs},
     )
 
 

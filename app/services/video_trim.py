@@ -1,11 +1,13 @@
 """Trim short clips around each Steam achievement unlock and generate
 SEO content (title / description / tags) for each clip.
 
-Output layout (flat, kept compatible with the existing /ui/cuts/file route):
+Output layout — clips land inside the same series-folder that already lives
+on the host-mounted video volume, so the user can find them right next to
+the source mp4:
 
-    {cuts_root}/
-        {video_id}__{idx:02d}-{ach-slug}.mp4
-        {video_id}__{idx:02d}-{ach-slug}.json   # SEO sidecar
+    <series_folder.path>/cut/
+        {video_id_short}__{idx:02d}-{ach-slug}.mp4
+        {video_id_short}__{idx:02d}-{ach-slug}.json   # SEO sidecar
 """
 from __future__ import annotations
 
@@ -75,12 +77,13 @@ def trim_clips_for_video(
     per_game_tags = _per_game_tags(folder.name)
     ollama = OllamaClient(settings)
 
-    cuts_root = Path(settings.cuts_root)
+    cuts_root = Path(folder.path) / "cut"
     cuts_root.mkdir(parents=True, exist_ok=True)
 
     duration = max(1, int(pre_seconds) + int(post_seconds))
     sorted_items = sorted(timed, key=lambda i: int(i.get("offset_seconds") or 0))
 
+    short_id = video.id[:8]
     results: list[TrimmedClip] = []
     for idx, item in enumerate(sorted_items, start=1):
         offset = max(0, int(item.get("offset_seconds") or 0))
@@ -91,7 +94,7 @@ def trim_clips_for_video(
         ach_desc = str(item.get("description") or "").strip()
 
         slug = slugify(f"{idx:02d}-{ach_name}")[:60] or f"clip-{idx:02d}"
-        clip_path = cuts_root / f"{video.id}__{slug}.mp4"
+        clip_path = cuts_root / f"{short_id}__{slug}.mp4"
         sidecar_path = clip_path.with_suffix(".json")
 
         if not _ffmpeg_extract(source, clip_path, start_seconds=start, duration_seconds=duration):
@@ -203,10 +206,26 @@ def _ffmpeg_extract(
         str(output),
     ]
     try:
-        subprocess.run(command, capture_output=True, check=True, timeout=300)
+        result = subprocess.run(command, capture_output=True, check=True, timeout=600)
+        if not output.exists() or output.stat().st_size == 0:
+            logger.warning(
+                "ffmpeg_trim_empty_output",
+                extra={"output": str(output), "stderr": (result.stderr or b"").decode("utf-8", "ignore")[-400:]},
+            )
+            return False
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        logger.warning("ffmpeg_trim_failed", extra={"err": str(exc)[:200]})
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or b"").decode("utf-8", "ignore")
+        logger.warning(
+            "ffmpeg_trim_failed",
+            extra={"returncode": exc.returncode, "stderr": stderr[-400:], "cmd": " ".join(command)},
+        )
+        return False
+    except FileNotFoundError as exc:
+        logger.warning("ffmpeg_trim_missing_binary", extra={"err": str(exc)})
+        return False
+    except subprocess.TimeoutExpired as exc:
+        logger.warning("ffmpeg_trim_timeout", extra={"err": str(exc)[:200]})
         return False
 
 

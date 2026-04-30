@@ -1,0 +1,61 @@
+{% if not runs %}
+  <p class="text-sm text-ink-500">Ainda sem histórico — execute um job para ver entradas aqui.</p>
+{% else %}
+<div class="overflow-hidden rounded-lg border border-ink-800">
+  <table class="w-full text-xs">
+    <thead class="bg-ink-950/60 text-[10px] uppercase tracking-wider text-ink-500">
+      <tr>
+        <th class="px-3 py-2 text-left">Status</th>
+        <th class="px-3 py-2 text-left">Tarefa</th>
+        <th class="px-3 py-2 text-left">Args</th>
+        <th class="px-3 py-2 text-left">Início</th>
+        <th class="px-3 py-2 text-left">Fim</th>
+        <th class="px-3 py-2 text-left">ID</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-ink-800">
+      {% for r in runs %}
+        {% set s = (r.status or 'PENDING')|upper %}
+        <tr class="align-top
+                   {% if s == 'FAILURE' %}bg-bad-500/5
+                   {% elif s == 'SUCCESS' %}bg-ok-500/5
+                   {% endif %}">
+          <td class="px-3 py-2">
+            <span class="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px]
+                  {% if s == 'SUCCESS' %}border-ok-500/40 bg-ok-500/10 text-ok-400
+                  {% elif s == 'FAILURE' %}border-bad-500/40 bg-bad-500/10 text-bad-400
+                  {% elif s == 'STARTED' %}border-warn-500/40 bg-warn-500/10 text-warn-400
+                  {% else %}border-ink-700 bg-ink-850 text-ink-300{% endif %}">
+              {{ s }}
+            </span>
+          </td>
+          <td class="px-3 py-2 font-mono text-ink-200">{{ r.name }}</td>
+          <td class="px-3 py-2 font-mono text-ink-400 truncate max-w-[18rem]">{{ r.args_json or '—' }}</td>
+          <td class="px-3 py-2 text-ink-400 tabular-nums">{{ r.started_at|ny_datetime if r.started_at else '—' }}</td>
+          <td class="px-3 py-2 text-ink-400 tabular-nums">{{ r.finished_at|ny_datetime if r.finished_at else '—' }}</td>
+          <td class="px-3 py-2 font-mono text-ink-500">{{ r.id[:12] }}</td>
+        </tr>
+        {% if r.error %}
+          <tr class="bg-bad-500/5">
+            <td colspan="6" class="px-3 py-2">
+              <details>
+                <summary class="cursor-pointer text-[11px] text-bad-400">Erro / traceback</summary>
+                <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-ink-950 p-2 text-[11px] text-bad-300">{{ r.error }}</pre>
+              </details>
+            </td>
+          </tr>
+        {% elif r.result %}
+          <tr>
+            <td colspan="6" class="px-3 py-1 text-[11px] text-ink-500">
+              <details>
+                <summary class="cursor-pointer">Resultado</summary>
+                <pre class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-ink-950 p-2 text-[11px] text-ink-400">{{ r.result }}</pre>
+              </details>
+            </td>
+          </tr>
+        {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

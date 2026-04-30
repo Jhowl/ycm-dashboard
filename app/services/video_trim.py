@@ -1,28 +1,40 @@
-"""Trim short clips around each Steam achievement unlock and generate
-SEO content (title / description / tags) for each clip.
+"""Trim short clips around each Steam achievement unlock and register them
+as standalone uploadable VideoAssets.
 
-Output layout — clips land inside the same series-folder that already lives
-on the host-mounted video volume, so the user can find them right next to
-the source mp4:
-
-    <series_folder.path>/cut/
-        {video_id_short}__{idx:02d}-{ach-slug}.mp4
-        {video_id_short}__{idx:02d}-{ach-slug}.json   # SEO sidecar
+For every successful cut we:
+  1. ffmpeg-extract the clip into ``<series_folder.path>/cut/`` so it lives
+     on the same host-mounted volume as the source video.
+  2. Generate PT-BR SEO content (title / description / tags) — Ollama with
+     deterministic template fallback.
+  3. Force-append an "Exact moment" footer with the original-video timestamp
+     so viewers can scrub back to context.
+  4. Create (or upsert) a ``VideoAsset`` row pointing at the clip and an
+     active ``MetadataDraft`` so the existing upload pipeline (approve →
+     youtube_publish) just works for cuts.
+  5. Drop a JSON sidecar next to the clip for offline auditing.
 """
 from __future__ import annotations
 
 import json
 import subprocess
 from dataclasses import asdict, dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 from slugify import slugify
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.logging_setup import get_logger
-from app.models import SeriesFolder, VideoAsset
+from app.models import (
+    MetadataDraft,
+    SeriesFolder,
+    TranscriptStatus,
+    VideoAsset,
+    VideoStatus,
+)
 from app.services.channel import get_or_create_channel_defaults
 from app.services.errors import NotFoundError, ValidationError
 from app.services.game_defaults import get_game_tag_defaults
@@ -30,12 +42,18 @@ from app.services.ollama import OllamaClient
 
 logger = get_logger(__name__)
 
+DEFAULT_TRIM_SECONDS = 60
+MIN_TRIM_SECONDS = 10
+MAX_TRIM_SECONDS = 600
+
 
 @dataclass(slots=True)
 class TrimmedClip:
     filename: str
     clip_path: str
     sidecar_path: str
+    clip_video_id: str
+    parent_video_id: str
     achievement_name: str
     offset_seconds: int
     start_seconds: int
@@ -53,8 +71,7 @@ def trim_clips_for_video(
     settings: Settings,
     video_id: str,
     *,
-    pre_seconds: int = 15,
-    post_seconds: int = 15,
+    trim_seconds: int = DEFAULT_TRIM_SECONDS,
 ) -> list[TrimmedClip]:
     video = db.get(VideoAsset, video_id)
     if not video:
@@ -73,6 +90,10 @@ def trim_clips_for_video(
     if not timed:
         return []
 
+    duration = max(MIN_TRIM_SECONDS, min(MAX_TRIM_SECONDS, int(trim_seconds or DEFAULT_TRIM_SECONDS)))
+    pre_seconds = duration // 2
+    post_seconds = duration - pre_seconds  # noqa: F841 (kept for clarity)
+
     defaults = get_or_create_channel_defaults(db, settings)
     per_game_tags = _per_game_tags(folder.name)
     ollama = OllamaClient(settings)
@@ -80,18 +101,19 @@ def trim_clips_for_video(
     cuts_root = Path(folder.path) / "cut"
     cuts_root.mkdir(parents=True, exist_ok=True)
 
-    duration = max(1, int(pre_seconds) + int(post_seconds))
     sorted_items = sorted(timed, key=lambda i: int(i.get("offset_seconds") or 0))
-
     short_id = video.id[:8]
+    parent_filename = video.filename
+
     results: list[TrimmedClip] = []
     for idx, item in enumerate(sorted_items, start=1):
         offset = max(0, int(item.get("offset_seconds") or 0))
-        start = max(0, offset - int(pre_seconds))
+        start = max(0, offset - pre_seconds)
         ach_name = str(
             item.get("displayName") or item.get("name") or item.get("apiName") or "achievement"
         ).strip()
         ach_desc = str(item.get("description") or "").strip()
+        timestamp_label = _hhmmss(offset)
 
         slug = slugify(f"{idx:02d}-{ach_name}")[:60] or f"clip-{idx:02d}"
         clip_path = cuts_root / f"{short_id}__{slug}.mp4"
@@ -110,21 +132,40 @@ def trim_clips_for_video(
             per_game_tags=per_game_tags,
             offset_seconds=offset,
             episode_number=video.series_number,
+            parent_filename=parent_filename,
+        )
+
+        clip_video, draft = _upsert_clip_video_and_draft(
+            db,
+            parent=video,
+            folder=folder,
+            clip_path=clip_path,
+            duration=duration,
+            offset=offset,
+            achievement=item,
+            ach_name=ach_name,
+            ach_desc=ach_desc,
+            timestamp_label=timestamp_label,
+            seo=seo,
+            ollama=ollama,
+            settings=settings,
         )
 
         sidecar = {
-            "video_id": video.id,
-            "video_filename": video.filename,
+            "parent_video_id": video.id,
+            "clip_video_id": clip_video.id,
+            "parent_video_filename": parent_filename,
             "game": folder.name,
             "steam_app_id": folder.steam_app_id,
             "achievement_name": ach_name,
             "achievement_description": ach_desc,
             "offset_seconds": offset,
+            "offset_label": timestamp_label,
             "start_seconds": start,
             "duration_seconds": duration,
-            "title": seo["title"],
-            "description": seo["description"],
-            "tags": seo["tags"],
+            "title": draft.title_ptbr,
+            "description": draft.description_ptbr,
+            "tags": list(draft.tags or []),
         }
         sidecar_path.write_text(
             json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -135,16 +176,19 @@ def trim_clips_for_video(
                 filename=clip_path.name,
                 clip_path=str(clip_path),
                 sidecar_path=str(sidecar_path),
+                clip_video_id=clip_video.id,
+                parent_video_id=video.id,
                 achievement_name=ach_name,
                 offset_seconds=offset,
                 start_seconds=start,
                 duration_seconds=duration,
-                title=seo["title"],
-                description=seo["description"],
-                tags=seo["tags"],
+                title=draft.title_ptbr,
+                description=draft.description_ptbr,
+                tags=list(draft.tags or []),
             )
         )
 
+    db.commit()
     logger.info(
         "trim_clips_generated",
         extra={"video_id": video.id, "count": len(results), "total": len(timed)},
@@ -178,6 +222,99 @@ def list_clip_metadata(cuts_root: Path) -> list[dict[str, Any]]:
 
 
 # ---- internals ---------------------------------------------------------
+
+
+def _upsert_clip_video_and_draft(
+    db: Session,
+    *,
+    parent: VideoAsset,
+    folder: SeriesFolder,
+    clip_path: Path,
+    duration: int,
+    offset: int,
+    achievement: dict[str, Any],
+    ach_name: str,
+    ach_desc: str,
+    timestamp_label: str,
+    seo: dict[str, Any],
+    ollama: OllamaClient,
+    settings: Settings,
+) -> tuple[VideoAsset, MetadataDraft]:
+    full_path = str(clip_path.resolve())
+
+    clip_video = db.execute(
+        select(VideoAsset).where(VideoAsset.source_path == full_path)
+    ).scalar_one_or_none()
+
+    recorded_at = None
+    if parent.recorded_at is not None:
+        recorded_at = parent.recorded_at + timedelta(seconds=int(offset))
+
+    clip_session = {
+        "is_clip": True,
+        "parent_video_id": parent.id,
+        "parent_video_filename": parent.filename,
+        "achievement_name": ach_name,
+        "achievement_description": ach_desc,
+        "achievement_offset_seconds": int(offset),
+        "achievement_offset_label": timestamp_label,
+        "achievements_unlocked": [ach_name],
+        "achievements_unlocked_detailed": [achievement],
+    }
+
+    if clip_video is None:
+        clip_video = VideoAsset(
+            folder_id=folder.id,
+            filename=clip_path.name,
+            source_path=full_path,
+            recorded_at=recorded_at,
+            duration_sec=int(duration),
+            series_number=None,
+            thumbnail_prompt=None,
+            status=VideoStatus.DRAFT_READY.value,
+            language=parent.language or settings.default_language,
+            session_payload=clip_session,
+            transcript_status=TranscriptStatus.SKIPPED.value,
+            chapters=[],
+            ollama_status="DONE",
+        )
+        db.add(clip_video)
+        db.flush()
+    else:
+        clip_video.folder_id = folder.id
+        clip_video.filename = clip_path.name
+        clip_video.duration_sec = int(duration)
+        clip_video.recorded_at = recorded_at or clip_video.recorded_at
+        clip_video.status = VideoStatus.DRAFT_READY.value
+        clip_video.transcript_status = TranscriptStatus.SKIPPED.value
+        clip_video.session_payload = clip_session
+        clip_video.ollama_status = "DONE"
+
+    # Deactivate any prior drafts on this clip and create a fresh active one.
+    if clip_video.drafts:
+        for existing in clip_video.drafts:
+            existing.is_active = False
+        next_version = max((d.version or 1) for d in clip_video.drafts) + 1
+    else:
+        next_version = 1
+
+    draft = MetadataDraft(
+        video_id=clip_video.id,
+        title_ptbr=seo["title"][:200],
+        description_ptbr=seo["description"],
+        tags=list(seo["tags"] or []),
+        chapters=[],
+        thumbnail_path=None,
+        thumbnail_prompt=None,
+        model_provider="ollama" if ollama.is_enabled() else "template",
+        model_name=settings.ollama_model if ollama.is_enabled() else None,
+        language=parent.language or settings.default_language or "pt-BR",
+        version=next_version,
+        is_active=True,
+    )
+    db.add(draft)
+    db.flush()
+    return clip_video, draft
 
 
 def _ffmpeg_extract(
@@ -239,6 +376,7 @@ def _build_seo_content(
     per_game_tags: list[str],
     offset_seconds: int,
     episode_number: int | None,
+    parent_filename: str,
 ) -> dict[str, Any]:
     fallback = _fallback_seo(
         game_name=game_name,
@@ -251,7 +389,7 @@ def _build_seo_content(
     )
 
     if not ollama.is_enabled():
-        return fallback
+        return _with_exact_moment(fallback, ach_name, offset_seconds, parent_filename)
 
     prompt = (
         "Voce e um redator de YouTube em portugues do Brasil especializado em SEO para clipes "
@@ -269,7 +407,7 @@ def _build_seo_content(
     raw = ollama._call(prompt, temperature=0.5)  # noqa: SLF001
     parsed = OllamaClient._parse_json(raw) if raw else None  # noqa: SLF001
     if not isinstance(parsed, dict):
-        return fallback
+        return _with_exact_moment(fallback, ach_name, offset_seconds, parent_filename)
 
     title = str(parsed.get("title") or fallback["title"]).strip()[:100] or fallback["title"]
     description = str(parsed.get("description") or fallback["description"]).strip()
@@ -279,7 +417,28 @@ def _build_seo_content(
     else:
         tags = fallback["tags"]
 
-    return {"title": title, "description": description, "tags": tags}
+    return _with_exact_moment(
+        {"title": title, "description": description, "tags": tags},
+        ach_name,
+        offset_seconds,
+        parent_filename,
+    )
+
+
+def _with_exact_moment(
+    seo: dict[str, Any], ach_name: str, offset_seconds: int, parent_filename: str
+) -> dict[str, Any]:
+    """Always append a deterministic footer with the precise original timestamp."""
+    timestamp = _hhmmss(offset_seconds)
+    footer = (
+        "\n\n---\n"
+        f"⏱️ Momento exato no video original: {timestamp}\n"
+        f"🏆 Conquista: {ach_name}\n"
+        f"🎬 Video original: {parent_filename}"
+    )
+    desc = (seo.get("description") or "").rstrip()
+    seo["description"] = f"{desc}{footer}"
+    return seo
 
 
 def _fallback_seo(
@@ -295,14 +454,12 @@ def _fallback_seo(
     ep_label = f" Episodio {episode_number:02d}" if episode_number else ""
     title = f"{game_name} - Conquista: {ach_name}{ep_label} | Gameplay PT-BR"[:100]
 
-    timestamp = _hhmmss(offset_seconds)
     description_lines = [
         f"Corte do gameplay de {game_name} mostrando o desbloqueio da conquista \"{ach_name}\".",
     ]
     if ach_description:
         description_lines.append(f"Descricao da conquista: {ach_description}")
     description_lines += [
-        f"Momento original do video: {timestamp}.",
         "Gameplay sem comentarios em portugues do Brasil.",
         "",
         "#GameplayPTBR #SemComentarios #Conquistas",

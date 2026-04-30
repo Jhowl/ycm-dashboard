@@ -460,8 +460,19 @@ def cuts_folder_file(folder_slug: str, filename: str, download: int = 0, db: Ses
 
 
 @router.post("/ui/videos/{video_id}/trim-achievements")
-def trim_achievement_clips_ui(video_id: str, request: Request, db: Session = Depends(get_db)):
+def trim_achievement_clips_ui(
+    video_id: str,
+    request: Request,
+    trim_seconds: int = Form(default=60),
+    db: Session = Depends(get_db),
+):
     """Enqueue per-achievement clip extraction + SEO content generation."""
+    from app.services.video_trim import (
+        DEFAULT_TRIM_SECONDS,
+        MAX_TRIM_SECONDS,
+        MIN_TRIM_SECONDS,
+    )
+
     video = db.get(VideoAsset, video_id)
     if not video:
         return _toast_response("Video nao encontrado", "err", status_code=404)
@@ -473,8 +484,10 @@ def trim_achievement_clips_ui(video_id: str, request: Request, db: Session = Dep
             "Nenhuma conquista com timestamp encontrada para este video.", "err", status_code=400
         )
 
+    trim_value = max(MIN_TRIM_SECONDS, min(MAX_TRIM_SECONDS, int(trim_seconds or DEFAULT_TRIM_SECONDS)))
+
     try:
-        task = trim_achievement_clips_task.delay(video_id)
+        task = trim_achievement_clips_task.delay(video_id, trim_value)
         try:
             from app.services.job_log import record_run
 
@@ -482,7 +495,7 @@ def trim_achievement_clips_ui(video_id: str, request: Request, db: Session = Dep
                 db,
                 task_id=task.id,
                 name="tasks.trim_achievement_clips",
-                args=[video_id],
+                args=[video_id, trim_value],
                 status="PENDING",
             )
         except Exception:
@@ -493,15 +506,17 @@ def trim_achievement_clips_ui(video_id: str, request: Request, db: Session = Dep
             settings = apply_runtime_overrides(settings, db)
             from app.services.video_trim import trim_clips_for_video
 
-            clips = trim_clips_for_video(db, settings, video_id)
+            clips = trim_clips_for_video(db, settings, video_id, trim_seconds=trim_value)
             return _toast_response(
-                f"Cortes gerados (sincrono): {len(clips)}", "ok"
+                f"Cortes gerados (sincrono): {len(clips)} ({trim_value}s)", "ok"
             )
         except Exception as inner:
             return _toast_response(f"Falha ao cortar: {inner}", "err", status_code=500)
 
     short = (task.id or "")[:8]
-    return _toast_response(f"Cortes enfileirados ({short})", "ok")
+    return _toast_response(
+        f"Cortes enfileirados ({short}) — {trim_value}s cada", "ok"
+    )
 
 
 @router.get('/ui/cuts/file/{filename}')

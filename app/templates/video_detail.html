@@ -91,14 +91,28 @@
     Gerar metadata
   </button>
   {% if achievements_unlocked_detailed %}
-  <button hx-post="/ui/videos/{{ video.id }}/trim-achievements"
-          hx-swap="none"
-          hx-disabled-elt="this"
-          class="inline-flex items-center gap-1.5 rounded-lg border border-accent-500/40 bg-accent-500/10 px-3 py-1.5 text-sm font-medium text-accent-400 hover:bg-accent-500/20 disabled:opacity-50"
-          title="Gera cortes curtos em volta de cada conquista e cria título/descrição/tags com SEO.">
-    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l12 16M18 4L6 20M4 7a3 3 0 1 0 6 0 3 3 0 0 0-6 0zM4 17a3 3 0 1 0 6 0 3 3 0 0 0-6 0z"/></svg>
-    Cortar conquistas ({{ achievements_unlocked_detailed|length }})
-  </button>
+  <form hx-post="/ui/videos/{{ video.id }}/trim-achievements"
+        hx-swap="none"
+        class="inline-flex items-center gap-2 rounded-lg border border-accent-500/40 bg-accent-500/10 px-2 py-1">
+    <label class="text-[11px] uppercase tracking-wider text-accent-300/80" for="trim-seconds-{{ video.id }}">Duração</label>
+    <select id="trim-seconds-{{ video.id }}" name="trim_seconds"
+            class="rounded-md border border-accent-500/40 bg-ink-950 px-1.5 py-1 text-xs text-accent-200 focus:border-accent-300 focus:ring-1 focus:ring-accent-300">
+      <option value="30">30s</option>
+      <option value="45">45s</option>
+      <option value="60" selected>1 min</option>
+      <option value="90">1m30</option>
+      <option value="120">2 min</option>
+      <option value="180">3 min</option>
+      <option value="300">5 min</option>
+    </select>
+    <button type="submit"
+            hx-disabled-elt="this"
+            class="inline-flex items-center gap-1.5 rounded-md bg-accent-500/30 px-2.5 py-1 text-sm font-medium text-accent-200 hover:bg-accent-500/40 disabled:opacity-50"
+            title="Gera cortes em volta de cada conquista e cria título/descrição/tags com SEO. Cada corte vira um vídeo no painel pronto pra publicar.">
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l12 16M18 4L6 20M4 7a3 3 0 1 0 6 0 3 3 0 0 0-6 0zM4 17a3 3 0 1 0 6 0 3 3 0 0 0-6 0z"/></svg>
+      Cortar conquistas ({{ achievements_unlocked_detailed|length }})
+    </button>
+  </form>
   {% endif %}
 </div>
 <div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>

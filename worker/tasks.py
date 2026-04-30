@@ -85,23 +85,19 @@ def transcribe_video_task(self, video_id: str) -> dict:
 
 
 @celery_app.task(name="tasks.trim_achievement_clips")
-def trim_achievement_clips_task(
-    video_id: str, pre_seconds: int = 15, post_seconds: int = 15
-) -> dict:
+def trim_achievement_clips_task(video_id: str, trim_seconds: int = 60) -> dict:
     with worker_session() as (settings, db):
-        clips = trim_clips_for_video(
-            db,
-            settings,
-            video_id,
-            pre_seconds=pre_seconds,
-            post_seconds=post_seconds,
-        )
+        clips = trim_clips_for_video(db, settings, video_id, trim_seconds=trim_seconds)
 
     logger.info(
-        "Achievement clips trimmed for video=%s count=%d", video_id, len(clips)
+        "Achievement clips trimmed for video=%s count=%d trim_seconds=%d",
+        video_id,
+        len(clips),
+        trim_seconds,
     )
     return {
         "video_id": video_id,
+        "trim_seconds": trim_seconds,
         "count": len(clips),
         "files": [c.filename for c in clips],
     }

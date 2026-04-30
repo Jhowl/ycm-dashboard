@@ -92,12 +92,28 @@
         {% if episode_links %}
           <div class="border-t border-ink-800 px-3 py-4">
             <p class="px-3 text-[11px] font-medium uppercase tracking-wider text-ink-400">Episódios</p>
-            <nav class="mt-2 space-y-0.5 max-h-72 overflow-y-auto">
+            <nav class="mt-2 space-y-0.5 max-h-60 overflow-y-auto">
               {% for ep in episode_links %}
                 <a href="{{ ep.href }}"
                    class="block truncate rounded-md px-3 py-1.5 text-xs
                           {% if ep.active %}bg-ink-800 text-white{% else %}text-ink-400 hover:bg-ink-850 hover:text-ink-100{% endif %}">
                   {{ ep.label }}
+                </a>
+              {% endfor %}
+            </nav>
+          </div>
+        {% endif %}
+
+        {% if clip_links %}
+          <div class="border-t border-ink-800 px-3 py-4">
+            <p class="px-3 text-[11px] font-medium uppercase tracking-wider text-ink-400">🏆 Cortes de conquista</p>
+            <nav class="mt-2 space-y-0.5 max-h-72 overflow-y-auto">
+              {% for cl in clip_links %}
+                <a href="{{ cl.href }}"
+                   class="flex items-center justify-between gap-2 rounded-md px-3 py-1.5 text-xs
+                          {% if cl.active %}bg-ink-800 text-white{% else %}text-ink-400 hover:bg-ink-850 hover:text-ink-100{% endif %}">
+                  <span class="truncate" title="{{ cl.label }}">{{ cl.label }}</span>
+                  {% if cl.sublabel %}<span class="shrink-0 tabular-nums text-[10px] text-ink-500">{{ cl.sublabel }}</span>{% endif %}
                 </a>
               {% endfor %}
             </nav>

@@ -131,7 +131,6 @@ def trim_clips_for_video(
             base_tags=list(defaults.default_tags or []),
             per_game_tags=per_game_tags,
             offset_seconds=offset,
-            episode_number=video.series_number,
             parent_filename=parent_filename,
         )
 
@@ -375,7 +374,6 @@ def _build_seo_content(
     base_tags: list[str],
     per_game_tags: list[str],
     offset_seconds: int,
-    episode_number: int | None,
     parent_filename: str,
 ) -> dict[str, Any]:
     fallback = _fallback_seo(
@@ -384,8 +382,6 @@ def _build_seo_content(
         ach_description=ach_description,
         base_tags=base_tags,
         per_game_tags=per_game_tags,
-        offset_seconds=offset_seconds,
-        episode_number=episode_number,
     )
 
     if not ollama.is_enabled():
@@ -398,8 +394,11 @@ def _build_seo_content(
         f"Conquista: {ach_name}\n"
         f"Descricao da conquista: {ach_description or 'sem descricao'}\n"
         f"Tags base: {', '.join(base_tags + per_game_tags) or 'nenhuma'}.\n"
-        "Regras: titulo com no maximo 95 chars, sem clickbait enganoso, em pt-BR, "
-        "incluindo o nome do jogo e da conquista; descricao com 2-3 paragrafos curtos "
+        "Regras: este e um CORTE/CLIPE, nao um episodio — NUNCA inclua 'Episodio NN', "
+        "numero de episodio, 'EP', 'parte', 'temporada' nem qualquer numeracao seriada. "
+        "O foco do titulo e da descricao deve ser a CONQUISTA e o jogo. "
+        "Titulo com no maximo 95 chars, sem clickbait enganoso, em pt-BR, "
+        "incluindo o nome do jogo e o nome da conquista; descricao com 2-3 paragrafos curtos "
         "(mencionar 'conquista' e 'gameplay'); 12 tags pt-BR curtas, sem #, sem virgulas dentro da tag. "
         'Responda em JSON: {"title": "...", "description": "...", "tags": ["...", "..."]}.'
     )
@@ -448,11 +447,8 @@ def _fallback_seo(
     ach_description: str,
     base_tags: list[str],
     per_game_tags: list[str],
-    offset_seconds: int,
-    episode_number: int | None,
 ) -> dict[str, Any]:
-    ep_label = f" Episodio {episode_number:02d}" if episode_number else ""
-    title = f"{game_name} - Conquista: {ach_name}{ep_label} | Gameplay PT-BR"[:100]
+    title = f"{game_name} - Conquista: {ach_name} | Gameplay PT-BR"[:100]
 
     description_lines = [
         f"Corte do gameplay de {game_name} mostrando o desbloqueio da conquista \"{ach_name}\".",

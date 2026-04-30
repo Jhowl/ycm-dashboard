@@ -801,21 +801,50 @@ from app.services.runtime_settings import (  # noqa: E402
 )
 
 
-def _episode_links_for_folder(db: Session, folder: SeriesFolder, current_id: str | None) -> list[dict]:
+def _episode_links_for_folder(db: Session, folder: SeriesFolder, current_id: str | None) -> tuple[list[dict], list[dict]]:
+    """Return (episode_links, clip_links) for the sidebar.
+
+    Episodes keep their ``EP NN`` label. Clips show the achievement name plus
+    the timestamp of the unlock — no filename, no episode reference.
+    """
     siblings = db.execute(
         select(VideoAsset)
         .where(VideoAsset.folder_id == folder.id)
         .order_by(VideoAsset.series_number.asc(), VideoAsset.created_at.asc())
     ).scalars().all()
-    links: list[dict] = []
+    episodes: list[dict] = []
+    clips: list[dict] = []
     for sib in siblings:
+        payload = sib.session_payload or {}
+        if payload.get("is_clip"):
+            ach_name = (payload.get("achievement_name") or "").strip() or "Conquista"
+            offset = int(payload.get("achievement_offset_seconds") or 0)
+            stamp = _format_offset(offset)
+            clips.append({
+                "label": ach_name,
+                "sublabel": stamp,
+                "href": f"/videos/{sib.id}",
+                "active": sib.id == current_id,
+            })
+            continue
+
         ep = sib.series_number or 0
-        links.append({
+        episodes.append({
             "label": f"EP {ep:02d}" if ep else sib.filename,
             "href": f"/videos/{sib.id}",
             "active": sib.id == current_id,
         })
-    return links
+
+    clips.sort(key=lambda c: c["label"].lower())
+    return episodes, clips
+
+
+def _format_offset(total_seconds: int) -> str:
+    total = max(0, int(total_seconds))
+    hh = total // 3600
+    mm = (total % 3600) // 60
+    ss = total % 60
+    return f"{hh:02d}:{mm:02d}:{ss:02d}" if hh else f"{mm:02d}:{ss:02d}"
 
 
 @router.get("/videos/{video_id}")
@@ -839,6 +868,21 @@ def video_detail_page(video_id: str, request: Request, db: Session = Depends(get
         for p in sorted(out_dir.glob("option_*.jpg"))[:4]:
             thumb_files.append({"url": f"/ui/video-settings/{video.id}/asset/{p.name}?v={int(p.stat().st_mtime)}"})
 
+    episode_links: list[dict] = []
+    clip_links: list[dict] = []
+    if folder:
+        episode_links, clip_links = _episode_links_for_folder(db, folder, video.id)
+
+    is_clip = bool(session_payload.get("is_clip"))
+    clip_meta = {
+        "is_clip": is_clip,
+        "achievement_name": (session_payload.get("achievement_name") or "").strip(),
+        "achievement_description": (session_payload.get("achievement_description") or "").strip(),
+        "offset_label": _format_offset(int(session_payload.get("achievement_offset_seconds") or 0)),
+        "parent_video_id": session_payload.get("parent_video_id"),
+        "parent_filename": session_payload.get("parent_video_filename"),
+    } if is_clip else None
+
     return templates.TemplateResponse(
         name="video_detail.html",
         request=request,
@@ -850,7 +894,9 @@ def video_detail_page(video_id: str, request: Request, db: Session = Depends(get
             "thumb_files": thumb_files,
             "achievements_unlocked": achievements_unlocked,
             "achievements_unlocked_detailed": achievements_unlocked_detailed,
-            "episode_links": _episode_links_for_folder(db, folder, video.id) if folder else [],
+            "episode_links": episode_links,
+            "clip_links": clip_links,
+            "clip_meta": clip_meta,
         },
     )
 

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ video.filename }} · YCM<div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
+{% block title %}{% if clip_meta and clip_meta.is_clip %}🏆 {{ clip_meta.achievement_name }}{% else %}{{ video.filename }}{% endif %} · YCM<div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
 <script>
 (function(){
   const indicator = document.getElementById('ollama-waiting-indicator');
@@ -21,7 +21,7 @@
 })();
 </script>
 {% endblock %}
-{% block heading %}{{ video.filename }}<div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
+{% block heading %}{% if clip_meta and clip_meta.is_clip %}🏆 {{ clip_meta.achievement_name }} <span class="ml-2 text-xs text-ink-500 tabular-nums">@{{ clip_meta.offset_label }} · {{ video.duration_sec or '—' }}s</span>{% else %}{{ video.filename }}{% endif %}<div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
 <script>
 (function(){
   const indicator = document.getElementById('ollama-waiting-indicator');
@@ -50,7 +50,15 @@
   <span class="text-ink-600">/</span>
   <a href="/series/{{ folder.slug }}" class="hover:text-ink-200 truncate">{{ folder.name }}</a>
   <span class="text-ink-600">/</span>
-  <span class="text-ink-100 truncate">Episódio {{ video.series_number or '—' }}</span>
+  {% if clip_meta and clip_meta.is_clip %}
+    <span class="text-ink-100 truncate">🏆 {{ clip_meta.achievement_name }}</span>
+    {% if clip_meta.parent_video_id %}
+      <span class="text-ink-600">·</span>
+      <a href="/videos/{{ clip_meta.parent_video_id }}" class="text-ink-500 hover:text-ink-200 truncate text-xs">do vídeo original</a>
+    {% endif %}
+  {% else %}
+    <span class="text-ink-100 truncate">Episódio {{ video.series_number or '—' }}</span>
+  {% endif %}
 </nav>
 <div id="ollama-waiting-indicator" class="hidden fixed bottom-4 right-4 z-50 rounded-lg border border-amber-700 bg-amber-950/95 px-4 py-3 text-sm text-amber-200 shadow-lg">Waiting on Ollama… generating metadata</div>
 <script>
@@ -76,7 +84,18 @@
 {% endblock %}
 
 {% block actions %}
-<div class="flex items-center gap-2">
+<div class="flex items-center gap-2 flex-wrap">
+  {% if clip_meta and clip_meta.is_clip %}
+    <button hx-post="/ui/videos/{{ video.id }}/upload"
+            hx-swap="none"
+            hx-disabled-elt="this"
+            hx-on::after-request="setTimeout(()=>location.reload(),2200)"
+            class="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-400 disabled:opacity-50"
+            title="Aprova o draft e envia o corte direto ao YouTube.">
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      Enviar ao YouTube
+    </button>
+  {% endif %}
   <button hx-post="/ui/videos/{{ video.id }}/transcribe"
           hx-swap="none"
           hx-on::after-request="window.showToast('Transcrição enfileirada','ok'); setTimeout(()=>location.reload(),1500)"
@@ -87,7 +106,7 @@
   <button hx-post="/ui/videos/{{ video.id }}/generate"
           hx-swap="none"
           hx-on::after-request="window.showToast('Draft gerado','ok'); setTimeout(()=>location.reload(),1500)"
-          class="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-400">
+          class="inline-flex items-center gap-1.5 rounded-lg {% if clip_meta and clip_meta.is_clip %}border border-ink-700 bg-ink-850 text-ink-200 hover:bg-ink-800{% else %}bg-brand-500 text-white hover:bg-brand-400{% endif %} px-3 py-1.5 text-sm font-medium">
     Gerar metadata
   </button>
   {% if achievements_unlocked_detailed %}

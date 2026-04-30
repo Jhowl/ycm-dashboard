@@ -337,6 +337,7 @@
       </dl>
     </section>
 
+    {% set achievement_clip_jobs = (video.session_payload or {}).get('achievement_clip_jobs', []) %}
     {% if achievements_unlocked_detailed or achievements_unlocked %}
       <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
         <h2 class="mb-3 text-sm font-semibold tracking-tight">Achievements for this video</h2>
@@ -356,6 +357,31 @@
             {% endfor %}
           </div>
         {% endif %}
+      </section>
+    {% endif %}
+
+    {% if achievement_clip_jobs %}
+      <section class="rounded-xl border border-ink-800 bg-ink-900 p-5 shadow-card">
+        <h2 class="mb-3 text-sm font-semibold tracking-tight">Achievement clip jobs</h2>
+        <div class="space-y-3 text-sm">
+          {% for job in achievement_clip_jobs[:5] %}
+            <div class="rounded-lg border border-ink-800 bg-ink-950/60 px-3 py-3">
+              <div class="flex items-center justify-between gap-3">
+                <div class="font-medium text-ink-100">{{ job.status }}</div>
+                <div class="text-xs text-ink-500">{{ job.updated_at or job.started_at }}</div>
+              </div>
+              {% if job.error %}<div class="mt-2 text-xs text-rose-300">{{ job.error }}</div>{% endif %}
+              {% if job.output_dir %}<div class="mt-2 text-xs text-ink-400">Output dir: {{ job.output_dir }}</div>{% endif %}
+              {% if job.clips %}
+                <div class="mt-2 space-y-1 text-xs text-ink-300">
+                  {% for clip in job.clips %}
+                    <div>[{{ clip.timecode }}] {{ clip.name }} → {{ clip.output_path }}</div>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
       </section>
     {% endif %}
 
